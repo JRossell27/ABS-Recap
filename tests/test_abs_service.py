@@ -80,3 +80,25 @@ def test_daily_message_has_role_breakout_and_no_key_moments():
     assert "Hitters: 31" in message
     assert "Fielders: 41" in message
     assert "Biggest Moments" not in message
+
+
+def test_season_message_shows_totals_even_without_leader_rows():
+    svc = ABSService()
+    message = svc.format_season_discord_message(
+        {
+            "season": 2026,
+            "total": 542,
+            "hitter_total": 271,
+            "fielder_total": 269,
+            "unknown_total": 2,
+            "failed_games": 0,
+            "games_scanned": 100,
+            "hitters": [],
+            "fielders": [],
+        }
+    )
+
+    assert "Total Challenges: 542" in message
+    assert "Hitters: 271" in message
+    assert "Fielders: 269" in message
+    assert "Unclassified: 2" in message

@@ -46,6 +46,7 @@ class ABSService:
         target_date = today - timedelta(days=1)
 
         games = self._fetch_schedule_for_date(target_date)
+        events, failed_games = self._collect_events_from_games(games)
         events = self._collect_events_from_games(games)
 
         overturned = sum(1 for event in events if event.overturned)
@@ -62,6 +63,8 @@ class ABSService:
             "overturned": overturned,
             "confirmed": confirmed,
             "success_rate": (overturned / total * 100.0) if total else 0.0,
+            "failed_games": failed_games,
+            "games_scanned": len(games),
             "overturned": overturned,
             "confirmed": confirmed,
             "success_rate": (overturned / total * 100.0) if total else 0.0,
@@ -84,6 +87,19 @@ class ABSService:
             end_date = start_date
 
         games = self._fetch_schedule_date_range(start_date, end_date)
+        events, failed_games = self._collect_events_from_games(games)
+
+        hitter_total = sum(1 for event in events if event.role == "hitter")
+        fielder_total = sum(1 for event in events if event.role == "fielder")
+
+        return {
+            "season": use_season,
+            "total": len(events),
+            "hitter_total": hitter_total,
+            "fielder_total": fielder_total,
+            "unknown_total": len(events) - hitter_total - fielder_total,
+            "failed_games": failed_games,
+            "games_scanned": len(games),
         events = self._collect_events_from_games(games)
 
         return {
@@ -103,6 +119,26 @@ class ABSService:
             f"Success Rate: {recap['success_rate']:.1f}%",
         ]
 
+        return "\n".join(lines)
+
+    def format_season_discord_message(self, recap: Dict[str, Any]) -> str:
+        lines = [
+            f"ABS Leaderboard {recap.get('season', '')} ⚾️",
+            f"Total Challenges: {recap.get('total', 0)}",
+            f"Hitters: {recap.get('hitter_total', 0)}",
+            f"Fielders: {recap.get('fielder_total', 0)}",
+        ]
+
+        unknown_total = recap.get("unknown_total", 0)
+        if unknown_total:
+            lines.append(f"Unclassified: {unknown_total}")
+
+        failed_games = recap.get("failed_games", 0)
+        games_scanned = recap.get("games_scanned", 0)
+        if failed_games:
+            lines.append(f"⚠️ Data fetch issues: {failed_games}/{games_scanned} games unavailable")
+
+        lines.append("Hitters (Success Rate)")
             f"Overturned: {recap['overturned']}",
             f"Confirmed: {recap['confirmed']}",
             f"Success Rate: {recap['success_rate']:.1f}%",
@@ -171,6 +207,10 @@ class ABSService:
             games.extend(day.get("games", []))
         return games
 
+    def _collect_events_from_games(self, games: Iterable[Dict[str, Any]]) -> Tuple[List[ChallengeEvent], int]:
+        events: List[ChallengeEvent] = []
+        failed_games = 0
+
     def _collect_events_from_games(self, games: Iterable[Dict[str, Any]]) -> List[ChallengeEvent]:
         events: List[ChallengeEvent] = []
         for game in games:
@@ -180,6 +220,11 @@ class ABSService:
             try:
                 feed = self._fetch_game_feed(game_pk)
             except requests.RequestException:
+                failed_games += 1
+                continue
+            events.extend(self._parse_game_events(feed, game_pk))
+
+        return events, failed_games
                 continue
             events.extend(self._parse_game_events(feed, game_pk))
         return events
@@ -236,6 +281,8 @@ class ABSService:
 
         has_abs_marker = any(k in text for k in ABS_KEYWORDS)
         has_pitch_call = any(k in text for k in PITCH_CALL_KEYWORDS)
+
+        return has_abs_marker and has_pitch_call
         has_pitch_event = any("pitchData" in event for event in play.get("playEvents", []) if isinstance(event, dict))
 
         return has_abs_marker and has_pitch_call and has_pitch_event
@@ -300,6 +347,10 @@ class ABSService:
         if "to strike" in text or "changed to strike" in text or "overturned to strike" in text:
             return pitcher.get("id"), pitcher.get("fullName", "Unknown Fielder"), "fielder"
 
+        # Infer by confirmed/original call wording.
+        if "confirmed called strike" in text or "call stands as strike" in text or "called strike" in text:
+            return batter.get("id"), batter.get("fullName", "Unknown Hitter"), "hitter"
+        if "confirmed called ball" in text or "call stands as ball" in text or "called ball" in text:
         # Infer by confirmed original call.
         if "confirmed called strike" in text or "call stands as strike" in text:
             return batter.get("id"), batter.get("fullName", "Unknown Hitter"), "hitter"
