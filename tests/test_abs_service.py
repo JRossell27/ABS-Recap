@@ -29,6 +29,19 @@ def test_detects_pitch_challenge():
     assert svc._is_abs_pitch_challenge(play) is True
 
 
+def test_detects_pitch_challenge_without_pitchdata_when_call_text_present():
+    svc = ABSService()
+    play = _play("ABS challenge confirmed called strike", include_pitch=False)
+    assert svc._is_abs_pitch_challenge(play) is True
+
+
+def test_excludes_non_abs_review_types():
+    svc = ABSService()
+    play = _play("Manager challenge confirmed called strike")
+    play["review"] = {"reviewType": "Manager Challenge"}
+    assert svc._is_abs_pitch_challenge(play) is False
+
+
 def test_role_split_hitter_vs_fielder():
     svc = ABSService()
 
@@ -41,6 +54,52 @@ def test_role_split_hitter_vs_fielder():
     _, fielder_name, fielder_role = svc._infer_challenger(fielder_play)
     assert fielder_name == "Pitcher Two"
     assert fielder_role == "fielder"
+
+
+def test_role_inference_from_final_call_and_overturn_status():
+    svc = ABSService()
+
+    confirmed_strike = _play("ABS challenge confirmed called strike")
+    _, _, role_confirmed_strike = svc._infer_challenger(confirmed_strike)
+    assert role_confirmed_strike == "hitter"
+
+    confirmed_ball = _play("ABS challenge confirmed called ball")
+    _, _, role_confirmed_ball = svc._infer_challenger(confirmed_ball)
+    assert role_confirmed_ball == "fielder"
+
+    overturned_to_strike = _play("ABS challenge overturned called ball to strike")
+    _, _, role_overturned_to_strike = svc._infer_challenger(overturned_to_strike)
+    assert role_overturned_to_strike == "fielder"
+
+    overturned_to_ball = _play("ABS challenge overturned called strike to ball")
+    _, _, role_overturned_to_ball = svc._infer_challenger(overturned_to_ball)
+    assert role_overturned_to_ball == "hitter"
+
+
+def test_parse_game_events_skips_challenges_without_outcome():
+    svc = ABSService()
+    feed = {
+        "liveData": {"plays": {"allPlays": [_play("ABS challenge on called strike")]}},
+        "gameData": {"teams": {"away": {"abbreviation": "A"}, "home": {"abbreviation": "H"}}},
+    }
+    events = svc._parse_game_events(feed, game_pk=123)
+    assert events == []
+
+
+def test_season_starts_on_march_25():
+    svc = ABSService()
+    start, end = {}, {}
+
+    def fake_fetch(start_date, end_date):
+        start["value"] = start_date
+        end["value"] = end_date
+        return []
+
+    svc._fetch_schedule_date_range = fake_fetch
+    svc._collect_events_from_games = lambda games: ([], 0)
+    svc.get_season_leaderboard(season=2026, run_date=__import__("datetime").date(2026, 4, 6))
+    assert start["value"] == __import__("datetime").date(2026, 3, 25)
+    assert end["value"] == __import__("datetime").date(2026, 4, 5)
 
 
 def test_build_player_rows_keeps_roles_separate():

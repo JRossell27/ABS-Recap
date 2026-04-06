@@ -9,17 +9,18 @@ import requests
 MLB_BASE_URL = "https://statsapi.mlb.com/api/v1"
 MLB_FEED_URL = "https://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live"
 
-ABS_KEYWORDS = {
+ABS_CONTEXT_KEYWORDS = {
     "abs",
     "automatic balls and strikes",
     "automatic ball strike",
-    "challenge",
-    "challenged",
+    "pitch challenge",
 }
+CHALLENGE_KEYWORDS = {"challenge", "challenged"}
 PITCH_CALL_KEYWORDS = {"called strike", "called ball", "to strike", "to ball", "strike", "ball", "zone"}
 EXCLUDED_KEYWORDS = {"hit by pitch", "hbp"}
 OVERTURNED_KEYWORDS = {"overturned", "reversed", "changed", "flipped"}
 CONFIRMED_KEYWORDS = {"confirmed", "upheld", "stands", "call stands"}
+NON_ABS_REVIEW_TYPES = {"manager challenge", "replay review", "umpire review"}
 
 
 @dataclass
@@ -74,7 +75,7 @@ class ABSService:
         today = run_date or date.today()
         use_season = season or today.year
 
-        start_date = date(use_season, 3, 1)
+        start_date = date(use_season, 3, 25)
         end_date = today - timedelta(days=1)
         if end_date < start_date:
             end_date = start_date
@@ -213,9 +214,9 @@ class ABSService:
                 continue
 
             description = self._challenge_description(play)
-            normalized = description.lower()
-            overturned = any(k in normalized for k in OVERTURNED_KEYWORDS)
-            confirmed = any(k in normalized for k in CONFIRMED_KEYWORDS) or not overturned
+            overturned, confirmed = self._infer_review_outcome(play)
+            if overturned is None:
+                continue
 
             inning = play.get("about", {}).get("inning")
             half = play.get("about", {}).get("halfInning", "").capitalize()
@@ -245,10 +246,18 @@ class ABSService:
         if any(k in text for k in EXCLUDED_KEYWORDS):
             return False
 
-        has_abs_marker = any(k in text for k in ABS_KEYWORDS)
+        review_type = self._extract_review_type(play).lower()
+        if any(t in review_type for t in NON_ABS_REVIEW_TYPES):
+            return False
+
+        has_challenge_marker = any(k in text for k in CHALLENGE_KEYWORDS)
+        has_abs_context = any(k in text for k in ABS_CONTEXT_KEYWORDS) or any(
+            k in review_type for k in ABS_CONTEXT_KEYWORDS
+        )
         has_pitch_call = any(k in text for k in PITCH_CALL_KEYWORDS)
         has_pitch_event = any("pitchData" in event for event in play.get("playEvents", []) if isinstance(event, dict))
-        return has_abs_marker and has_pitch_call and has_pitch_event
+        final_call = self._infer_final_call(play)
+        return has_challenge_marker and has_abs_context and has_pitch_call and (has_pitch_event or final_call is not None)
 
     def _collect_play_text(self, play: Dict[str, Any]) -> str:
         chunks: List[str] = []
@@ -293,10 +302,50 @@ class ABSService:
 
         return "ABS challenge"
 
+    def _extract_review_type(self, play: Dict[str, Any]) -> str:
+        review = play.get("review")
+        if isinstance(review, dict):
+            for key in ("reviewType", "type", "description", "details"):
+                value = review.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value
+                if isinstance(value, dict):
+                    for nested_value in value.values():
+                        if isinstance(nested_value, str) and nested_value.strip():
+                            return nested_value
+        return ""
+
+    def _infer_review_outcome(self, play: Dict[str, Any]) -> Tuple[Optional[bool], Optional[bool]]:
+        text = self._collect_play_text(play).lower()
+        if any(k in text for k in OVERTURNED_KEYWORDS):
+            return True, False
+        if any(k in text for k in CONFIRMED_KEYWORDS):
+            return False, True
+
+        review = play.get("review")
+        if isinstance(review, dict):
+            for key in ("isOverturned", "overturned"):
+                value = review.get(key)
+                if isinstance(value, bool):
+                    return value, not value
+
+            for key in ("decision", "result", "reviewResult", "description"):
+                value = review.get(key)
+                if isinstance(value, str):
+                    normalized = value.lower()
+                    if any(k in normalized for k in OVERTURNED_KEYWORDS):
+                        return True, False
+                    if any(k in normalized for k in CONFIRMED_KEYWORDS):
+                        return False, True
+
+        return None, None
+
     def _infer_challenger(self, play: Dict[str, Any]) -> Tuple[Optional[int], str, Optional[str]]:
         text = self._collect_play_text(play).lower()
         batter = play.get("matchup", {}).get("batter", {})
         pitcher = play.get("matchup", {}).get("pitcher", {})
+        overturned = any(k in text for k in OVERTURNED_KEYWORDS)
+        final_call = self._infer_final_call(play)
 
         if any(marker in text for marker in ("batter challenge", "hitter challenge", "challenged by batter")):
             return batter.get("id"), batter.get("fullName", "Unknown Hitter"), "hitter"
@@ -313,7 +362,49 @@ class ABSService:
         if "confirmed called ball" in text or "call stands as ball" in text:
             return pitcher.get("id"), pitcher.get("fullName", "Unknown Fielder"), "fielder"
 
+        if final_call == "ball":
+            if overturned:
+                return batter.get("id"), batter.get("fullName", "Unknown Hitter"), "hitter"
+            return pitcher.get("id"), pitcher.get("fullName", "Unknown Fielder"), "fielder"
+        if final_call == "strike":
+            if overturned:
+                return pitcher.get("id"), pitcher.get("fullName", "Unknown Fielder"), "fielder"
+            return batter.get("id"), batter.get("fullName", "Unknown Hitter"), "hitter"
+
         return None, "Unknown Challenger", None
+
+    def _infer_final_call(self, play: Dict[str, Any]) -> Optional[str]:
+        text = self._collect_play_text(play).lower()
+
+        if "called strike" in text or "to strike" in text or "as strike" in text:
+            return "strike"
+        if "called ball" in text or "to ball" in text or "as ball" in text:
+            return "ball"
+
+        for event in reversed(play.get("playEvents", [])):
+            if not isinstance(event, dict):
+                continue
+            details = event.get("details", {})
+            if not isinstance(details, dict):
+                continue
+
+            description = details.get("description")
+            if isinstance(description, str):
+                lower_description = description.lower()
+                if "called strike" in lower_description:
+                    return "strike"
+                if "called ball" in lower_description:
+                    return "ball"
+
+            code = details.get("code")
+            if isinstance(code, str):
+                normalized = code.upper()
+                if normalized in {"C", "S"}:
+                    return "strike"
+                if normalized in {"B", "I", "P", "V"}:
+                    return "ball"
+
+        return None
 
     def _win_probability_delta(self, play: Dict[str, Any]) -> float:
         about = play.get("about", {})
