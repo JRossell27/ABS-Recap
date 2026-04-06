@@ -14,51 +14,55 @@ Flask dashboard that sends MLB ABS pitch-challenge recaps to Discord.
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
 python app.py
 ```
 
 Open: `http://localhost:8080`
 
-## Fly.io deployment notes
-This repository includes a `Dockerfile` and `fly.toml` configured to run Gunicorn on `0.0.0.0:8080`, with an explicit `/healthz` check for Fly machine health.
-This repository includes a `Dockerfile` and `fly.toml` configured to run Gunicorn on `0.0.0.0:8080`.
+## Fly.io deployment (GitHub + Fly)
+This repository includes a `Dockerfile` and `fly.toml` configured to run Gunicorn on `0.0.0.0:8080` with a `/healthz` check.
 
-1. Set required secrets:
+1. Create or verify the Fly app (one-time):
+
+```bash
+fly apps create abs-recap
+```
+
+2. Set required secrets:
 
 ```bash
 fly secrets set DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
 fly secrets set FLASK_SECRET_KEY="$(openssl rand -hex 32)"
 ```
 
-2. Deploy using the included config:
+3. Deploy from GitHub or local:
 
 ```bash
 fly deploy
 ```
 
-The app includes a health endpoint at `/healthz` used by Fly checks.
+4. Ensure at least one machine is running:
 
-3. If you see "app is not listening on 0.0.0.0:8080", verify the running image was built from this repo and check logs:
+```bash
+fly machines list
+fly scale count 1
+```
+
+5. Debug checks/logs if needed:
 
 ```bash
 fly logs
-fly ssh console -C "ps aux"
+fly status
 ```
+
+Notes:
 - App binds to `PORT` (default `8080`) for Fly runtime compatibility.
-- Recommended process command:
-
-```bash
-gunicorn -w 2 -b 0.0.0.0:$PORT app:app
-```
-
-- Required secret:
-  - `DISCORD_WEBHOOK_URL`
+- `fly.toml` is set to `min_machines_running = 1` and `auto_stop_machines = "off"` to avoid ending up with zero machines.
 
 ## Parsing approach
 Because ABS feed fields are still evolving, challenge detection is rule-based:
 1. Must include ABS/challenge markers.
-2. Must include pitch-call indicators (strike/ball/zone).
+2. Must include pitch-call indicators (ball/strike/zone).
 3. Must have pitch event evidence (`pitchData` on at least one play event).
 4. Must not include HBP markers.
 
