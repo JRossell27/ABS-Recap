@@ -258,6 +258,7 @@ class ABSService:
         has_pitch_event = any("pitchData" in event for event in play.get("playEvents", []) if isinstance(event, dict))
         final_call = self._infer_final_call(play)
         return has_challenge_marker and has_abs_context and has_pitch_call and (has_pitch_event or final_call is not None)
+        return has_abs_marker and has_pitch_call and (has_pitch_event or final_call is not None)
 
     def _collect_play_text(self, play: Dict[str, Any]) -> str:
         chunks: List[str] = []
