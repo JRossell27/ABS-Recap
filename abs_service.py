@@ -248,7 +248,8 @@ class ABSService:
         has_abs_marker = any(k in text for k in ABS_KEYWORDS)
         has_pitch_call = any(k in text for k in PITCH_CALL_KEYWORDS)
         has_pitch_event = any("pitchData" in event for event in play.get("playEvents", []) if isinstance(event, dict))
-        return has_abs_marker and has_pitch_call and has_pitch_event
+        final_call = self._infer_final_call(play)
+        return has_abs_marker and has_pitch_call and (has_pitch_event or final_call is not None)
 
     def _collect_play_text(self, play: Dict[str, Any]) -> str:
         chunks: List[str] = []
@@ -297,6 +298,8 @@ class ABSService:
         text = self._collect_play_text(play).lower()
         batter = play.get("matchup", {}).get("batter", {})
         pitcher = play.get("matchup", {}).get("pitcher", {})
+        overturned = any(k in text for k in OVERTURNED_KEYWORDS)
+        final_call = self._infer_final_call(play)
 
         if any(marker in text for marker in ("batter challenge", "hitter challenge", "challenged by batter")):
             return batter.get("id"), batter.get("fullName", "Unknown Hitter"), "hitter"
@@ -313,7 +316,49 @@ class ABSService:
         if "confirmed called ball" in text or "call stands as ball" in text:
             return pitcher.get("id"), pitcher.get("fullName", "Unknown Fielder"), "fielder"
 
+        if final_call == "ball":
+            if overturned:
+                return batter.get("id"), batter.get("fullName", "Unknown Hitter"), "hitter"
+            return pitcher.get("id"), pitcher.get("fullName", "Unknown Fielder"), "fielder"
+        if final_call == "strike":
+            if overturned:
+                return pitcher.get("id"), pitcher.get("fullName", "Unknown Fielder"), "fielder"
+            return batter.get("id"), batter.get("fullName", "Unknown Hitter"), "hitter"
+
         return None, "Unknown Challenger", None
+
+    def _infer_final_call(self, play: Dict[str, Any]) -> Optional[str]:
+        text = self._collect_play_text(play).lower()
+
+        if "called strike" in text or "to strike" in text or "as strike" in text:
+            return "strike"
+        if "called ball" in text or "to ball" in text or "as ball" in text:
+            return "ball"
+
+        for event in reversed(play.get("playEvents", [])):
+            if not isinstance(event, dict):
+                continue
+            details = event.get("details", {})
+            if not isinstance(details, dict):
+                continue
+
+            description = details.get("description")
+            if isinstance(description, str):
+                lower_description = description.lower()
+                if "called strike" in lower_description:
+                    return "strike"
+                if "called ball" in lower_description:
+                    return "ball"
+
+            code = details.get("code")
+            if isinstance(code, str):
+                normalized = code.upper()
+                if normalized in {"C", "S"}:
+                    return "strike"
+                if normalized in {"B", "I", "P", "V"}:
+                    return "ball"
+
+        return None
 
     def _win_probability_delta(self, play: Dict[str, Any]) -> float:
         about = play.get("about", {})
