@@ -22,6 +22,7 @@ Open: `http://localhost:8080`
 
 ## Fly.io deployment notes
 This repository includes a `Dockerfile` and `fly.toml` configured to run Gunicorn on `0.0.0.0:8080`, with an explicit `/healthz` check for Fly machine health.
+This repository includes a `Dockerfile` and `fly.toml` configured to run Gunicorn on `0.0.0.0:8080`.
 
 1. Set required secrets:
 
@@ -44,6 +45,15 @@ The app includes a health endpoint at `/healthz` used by Fly checks.
 fly logs
 fly ssh console -C "ps aux"
 ```
+- App binds to `PORT` (default `8080`) for Fly runtime compatibility.
+- Recommended process command:
+
+```bash
+gunicorn -w 2 -b 0.0.0.0:$PORT app:app
+```
+
+- Required secret:
+  - `DISCORD_WEBHOOK_URL`
 
 ## Parsing approach
 Because ABS feed fields are still evolving, challenge detection is rule-based:
