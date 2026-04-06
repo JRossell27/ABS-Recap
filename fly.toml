@@ -9,9 +9,6 @@ primary_region = "ord"
   WEB_CONCURRENCY = "1"
   GUNICORN_THREADS = "4"
 
-[processes]
-  app = "gunicorn -w ${WEB_CONCURRENCY} -k gthread --threads ${GUNICORN_THREADS} -b 0.0.0.0:8080 app:app"
-
 [http_service]
   internal_port = 8080
   force_https = true
