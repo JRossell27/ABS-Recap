@@ -29,6 +29,13 @@ def index():
     return render_template("index.html")
 
 
+
+
+@app.get("/healthz")
+def healthz():
+    return {"status": "ok"}, 200
+
+
 @app.post("/send/daily")
 def send_daily():
     try:

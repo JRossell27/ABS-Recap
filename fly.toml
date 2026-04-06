@@ -6,6 +6,9 @@ primary_region = "ord"
 
 [env]
   PORT = "8080"
+
+[processes]
+  app = "gunicorn -w 2 -k gthread -b 0.0.0.0:8080 app:app"
 app = "mets-hrs"
 primary_region = "ewr"
 
@@ -28,6 +31,13 @@ primary_region = "ewr"
   memory = "1gb"
   cpu_kind = "shared"
   cpus = 1
+
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "30s"
+  method = "GET"
+  timeout = "5s"
+  path = "/healthz"
   auto_stop_machines = "off"
   auto_start_machines = true
   min_machines_running = 1

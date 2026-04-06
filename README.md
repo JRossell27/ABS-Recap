@@ -21,6 +21,7 @@ python app.py
 Open: `http://localhost:8080`
 
 ## Fly.io deployment notes
+This repository includes a `Dockerfile` and `fly.toml` configured to run Gunicorn on `0.0.0.0:8080`, with an explicit `/healthz` check for Fly machine health.
 This repository includes a `Dockerfile` and `fly.toml` configured to run Gunicorn on `0.0.0.0:8080`.
 
 1. Set required secrets:
@@ -35,6 +36,8 @@ fly secrets set FLASK_SECRET_KEY="$(openssl rand -hex 32)"
 ```bash
 fly deploy
 ```
+
+The app includes a health endpoint at `/healthz` used by Fly checks.
 
 3. If you see "app is not listening on 0.0.0.0:8080", verify the running image was built from this repo and check logs:
 
