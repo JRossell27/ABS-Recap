@@ -68,6 +68,7 @@ Notes:
 - App binds to `PORT` (default `8080`) for Fly runtime compatibility.
 - `fly.toml` is set to `min_machines_running = 1` and `auto_stop_machines = "off"` to avoid ending up with zero machines.
 - Gunicorn is configured for low-memory Fly VMs (`WEB_CONCURRENCY=1`, `GUNICORN_THREADS=4`) to reduce restart loops from worker over-allocation on 256MB machines.
+- If you define a Fly `[processes]` command, avoid `${VAR}` placeholders there: Fly runs it directly and does **not** do shell interpolation. This can cause errors like `invalid int value: '${WEB_CONCURRENCY}'`.
 
 ## Parsing approach
 Because ABS feed fields are still evolving, challenge detection is rule-based:
