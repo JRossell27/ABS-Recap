@@ -6,9 +6,11 @@ primary_region = "ord"
 
 [env]
   PORT = "8080"
+  WEB_CONCURRENCY = "1"
+  GUNICORN_THREADS = "4"
 
 [processes]
-  app = "gunicorn -w 2 -k gthread -b 0.0.0.0:8080 app:app"
+  app = "gunicorn -w ${WEB_CONCURRENCY} -k gthread --threads ${GUNICORN_THREADS} -b 0.0.0.0:8080 app:app"
 
 [http_service]
   internal_port = 8080

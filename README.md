@@ -41,6 +41,15 @@ fly secrets set FLASK_SECRET_KEY="$(openssl rand -hex 32)"
 fly deploy
 ```
 
+If Fly returns a temporary machine lease error during rolling updates (for example `lease currently held`), use the retry wrapper:
+
+```bash
+./scripts/fly_deploy_retry.sh \
+  --app abs-recap \
+  --image registry.fly.io/abs-recap:deployment-<tag> \
+  --config fly.toml
+```
+
 4. Ensure at least one machine is running:
 
 ```bash
@@ -58,6 +67,7 @@ fly status
 Notes:
 - App binds to `PORT` (default `8080`) for Fly runtime compatibility.
 - `fly.toml` is set to `min_machines_running = 1` and `auto_stop_machines = "off"` to avoid ending up with zero machines.
+- Gunicorn is configured for low-memory Fly VMs (`WEB_CONCURRENCY=1`, `GUNICORN_THREADS=4`) to reduce restart loops from worker over-allocation on 256MB machines.
 
 ## Parsing approach
 Because ABS feed fields are still evolving, challenge detection is rule-based:
