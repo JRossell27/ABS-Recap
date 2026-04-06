@@ -62,6 +62,10 @@ class ABSService:
             "overturned": overturned,
             "confirmed": confirmed,
             "success_rate": (overturned / total * 100.0) if total else 0.0,
+            "overturned": overturned,
+            "confirmed": confirmed,
+            "success_rate": (overturned / total * 100.0) if total else 0.0,
+            "biggest_moments": sorted(events, key=lambda event: event.win_probability_delta, reverse=True)[:2],
         }
 
     def get_season_leaderboard(
@@ -98,6 +102,24 @@ class ABSService:
             f"Confirmed: {recap['confirmed']}",
             f"Success Rate: {recap['success_rate']:.1f}%",
         ]
+
+            f"Overturned: {recap['overturned']}",
+            f"Confirmed: {recap['confirmed']}",
+            f"Success Rate: {recap['success_rate']:.1f}%",
+            "Biggest Moments:",
+        ]
+
+        moments = recap.get("biggest_moments", [])
+        if not moments:
+            lines.append("• No ABS pitch challenges found")
+            return "\n".join(lines)
+
+        for event in moments:
+            result = "Overturned" if event.overturned else "Confirmed"
+            lines.append(
+                f"• {event.game_label} ({event.inning_label}) — {result}"
+                f" (WPA swing {event.win_probability_delta:.3f})"
+            )
 
         return "\n".join(lines)
 
