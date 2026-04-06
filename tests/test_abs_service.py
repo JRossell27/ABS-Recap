@@ -42,6 +42,13 @@ def test_excludes_non_abs_review_types():
     assert svc._is_abs_pitch_challenge(play) is False
 
 
+def test_detects_abs_challenge_from_review_metadata_without_abs_text():
+    svc = ABSService()
+    play = _play("Challenge confirmed called strike")
+    play["review"] = {"reviewType": "Ball/Strike Review", "isOverturned": False}
+    assert svc._is_abs_pitch_challenge(play) is True
+
+
 def test_role_split_hitter_vs_fielder():
     svc = ABSService()
 
