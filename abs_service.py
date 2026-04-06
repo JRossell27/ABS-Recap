@@ -267,6 +267,11 @@ class ABSService:
             has_challenge_marker
             and (has_abs_context or has_abs_review_metadata)
             and has_pitch_evidence
+        return (
+            has_challenge_marker
+            and has_pitch_call
+            and (has_abs_context or has_abs_review_metadata)
+            and (has_pitch_event or final_call is not None)
         )
 
     def _collect_play_text(self, play: Dict[str, Any]) -> str:
