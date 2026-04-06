@@ -262,6 +262,11 @@ class ABSService:
         has_pitch_event = any("pitchData" in event for event in play.get("playEvents", []) if isinstance(event, dict))
         final_call = self._infer_final_call(play)
         has_abs_review_metadata = self._has_abs_review_metadata(play)
+        has_pitch_evidence = has_pitch_call or has_pitch_event or final_call is not None
+        return (
+            has_challenge_marker
+            and (has_abs_context or has_abs_review_metadata)
+            and has_pitch_evidence
         return (
             has_challenge_marker
             and has_pitch_call
@@ -363,6 +368,12 @@ class ABSService:
                         return True, False
                     if any(k in normalized for k in CONFIRMED_KEYWORDS):
                         return False, True
+
+            # Feed payloads sometimes provide review metadata without explicit
+            # "confirmed/overturned" wording. If the play is already identified
+            # as an ABS challenge and review data is present, treat it as confirmed.
+            if self._has_abs_review_metadata(play):
+                return False, True
 
         return None, None
 
