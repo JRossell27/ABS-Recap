@@ -51,10 +51,17 @@ class ABSService:
         overturned = sum(1 for event in events if event.overturned)
         confirmed = sum(1 for event in events if event.confirmed)
         total = len(events)
+        hitter_total = sum(1 for event in events if event.role == "hitter")
+        fielder_total = sum(1 for event in events if event.role == "fielder")
 
         return {
             "date": target_date,
             "total": total,
+            "hitter_total": hitter_total,
+            "fielder_total": fielder_total,
+            "overturned": overturned,
+            "confirmed": confirmed,
+            "success_rate": (overturned / total * 100.0) if total else 0.0,
             "overturned": overturned,
             "confirmed": confirmed,
             "success_rate": (overturned / total * 100.0) if total else 0.0,
@@ -89,6 +96,13 @@ class ABSService:
         lines = [
             f"ABS Daily Recap For {recap['date'].isoformat()} ⚾️",
             f"Total Challenges: {recap['total']}",
+            f"Hitters: {recap.get('hitter_total', 0)}",
+            f"Fielders: {recap.get('fielder_total', 0)}",
+            f"Overturned: {recap['overturned']}",
+            f"Confirmed: {recap['confirmed']}",
+            f"Success Rate: {recap['success_rate']:.1f}%",
+        ]
+
             f"Overturned: {recap['overturned']}",
             f"Confirmed: {recap['confirmed']}",
             f"Success Rate: {recap['success_rate']:.1f}%",

@@ -60,3 +60,23 @@ def test_build_player_rows_keeps_roles_separate():
 
     assert hitters[0]["total"] == 2
     assert fielders[0]["total"] == 1
+
+
+def test_daily_message_has_role_breakout_and_no_key_moments():
+    svc = ABSService()
+    message = svc.format_daily_discord_message(
+        {
+            "date": __import__("datetime").date(2026, 4, 5),
+            "total": 72,
+            "hitter_total": 31,
+            "fielder_total": 41,
+            "overturned": 20,
+            "confirmed": 52,
+            "success_rate": 27.8,
+        }
+    )
+
+    assert "Total Challenges: 72" in message
+    assert "Hitters: 31" in message
+    assert "Fielders: 41" in message
+    assert "Biggest Moments" not in message
