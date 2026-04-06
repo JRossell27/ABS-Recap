@@ -21,6 +21,27 @@ python app.py
 Open: `http://localhost:8080`
 
 ## Fly.io deployment notes
+This repository includes a `Dockerfile` and `fly.toml` configured to run Gunicorn on `0.0.0.0:8080`.
+
+1. Set required secrets:
+
+```bash
+fly secrets set DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
+fly secrets set FLASK_SECRET_KEY="$(openssl rand -hex 32)"
+```
+
+2. Deploy using the included config:
+
+```bash
+fly deploy
+```
+
+3. If you see "app is not listening on 0.0.0.0:8080", verify the running image was built from this repo and check logs:
+
+```bash
+fly logs
+fly ssh console -C "ps aux"
+```
 - App binds to `PORT` (default `8080`) for Fly runtime compatibility.
 - Recommended process command:
 
