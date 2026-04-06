@@ -41,6 +41,15 @@ fly secrets set FLASK_SECRET_KEY="$(openssl rand -hex 32)"
 fly deploy
 ```
 
+If Fly returns a temporary machine lease error during rolling updates (for example `lease currently held`), use the retry wrapper:
+
+```bash
+./scripts/fly_deploy_retry.sh \
+  --app abs-recap \
+  --image registry.fly.io/abs-recap:deployment-<tag> \
+  --config fly.toml
+```
+
 4. Ensure at least one machine is running:
 
 ```bash
