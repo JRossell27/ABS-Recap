@@ -14,4 +14,4 @@ RUN python -m py_compile app.py abs_service.py
 
 EXPOSE 8080
 
-CMD ["python", "-u", "app.py"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "app:app"]
