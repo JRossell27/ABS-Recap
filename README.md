@@ -50,6 +50,8 @@ If Fly returns a temporary machine lease error during rolling updates (for examp
   --config fly.toml
 ```
 
+The retry wrapper now also validates post-deploy machine state and will auto-start/scale a machine if Fly reports no healthy routing candidates (for example proxy errors about no machines to route requests).
+
 4. Ensure at least one machine is running:
 
 ```bash
