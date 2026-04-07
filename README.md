@@ -51,6 +51,9 @@ If Fly returns a temporary machine lease error during rolling updates (for examp
 ```
 
 The retry wrapper now also validates post-deploy machine state and will auto-start/scale a machine if Fly reports no healthy routing candidates (for example proxy errors about no machines to route requests).
+It also runs a Python syntax preflight (`python -m py_compile app.py abs_service.py`) before deploy so worker-boot syntax crashes are caught before shipping.
+
+4. Ensure at least **two** machines are running (recommended for zero-downtime routing during deploys):
 
 4. Ensure at least **two** machines are running (recommended for zero-downtime routing during deploys):
 4. Ensure at least one machine is running:

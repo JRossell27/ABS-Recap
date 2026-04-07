@@ -18,6 +18,7 @@ SLEEP_SECONDS="${SLEEP_SECONDS:-20}"
 POST_DEPLOY_WAIT_SECONDS="${POST_DEPLOY_WAIT_SECONDS:-10}"
 POST_DEPLOY_MAX_CHECKS="${POST_DEPLOY_MAX_CHECKS:-12}"
 MIN_RUNNING_MACHINES="${MIN_RUNNING_MACHINES:-2}"
+RUN_PREFLIGHT_CHECKS="${RUN_PREFLIGHT_CHECKS:-1}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -47,6 +48,11 @@ done
 if [[ -z "$APP" || -z "$IMAGE" ]]; then
   echo "Missing required args. Expected --app and --image." >&2
   exit 2
+fi
+
+if [[ "$RUN_PREFLIGHT_CHECKS" == "1" ]]; then
+  echo "Running preflight syntax checks..."
+  python -m py_compile app.py abs_service.py
 fi
 
 attempt=1
