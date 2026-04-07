@@ -56,6 +56,27 @@ def test_detects_abs_challenge_with_sparse_review_text():
     assert svc._is_abs_pitch_challenge(play) is True
 
 
+def test_detects_pitch_call_review_without_explicit_abs_keyword():
+    svc = ABSService()
+    play = _play("Challenge on called strike, call stands", include_pitch=True)
+    play["review"] = {"decision": "call stands"}
+    assert svc._is_abs_pitch_challenge(play) is True
+
+
+def test_detects_mj_reviewtype_without_abs_text_or_pitchdata():
+    svc = ABSService()
+    play = _play("Review in progress", include_pitch=False)
+    play["reviewDetails"] = {"reviewType": "MJ", "inProgress": False, "isOverturned": True}
+    assert svc._is_abs_pitch_challenge(play) is True
+
+
+def test_excludes_generic_non_pitch_reviews():
+    svc = ABSService()
+    play = _play("Safe/out challenge at first base", include_pitch=False)
+    play["review"] = {"reviewType": "Replay Review"}
+    assert svc._is_abs_pitch_challenge(play) is False
+
+
 def test_role_split_hitter_vs_fielder():
     svc = ABSService()
 
@@ -105,6 +126,13 @@ def test_review_metadata_defaults_outcome_to_confirmed():
     play = _play("Challenge", include_pitch=True)
     play["review"] = {"reviewType": "Ball/Strike Review", "status": "Complete"}
     assert svc._infer_review_outcome(play) == (False, True)
+
+
+def test_infers_outcome_from_playevent_reviewdetails():
+    svc = ABSService()
+    play = _play("Challenge under review", include_pitch=True)
+    play["playEvents"][0]["reviewDetails"] = {"reviewType": "MJ", "isOverturned": True}
+    assert svc._infer_review_outcome(play) == (True, False)
 
 
 def test_season_starts_on_march_25():

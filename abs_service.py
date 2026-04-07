@@ -20,7 +20,9 @@ ABS_CONTEXT_KEYWORDS = {
     "pitch challenge",
 }
 CHALLENGE_KEYWORDS = {"challenge", "challenged"}
+REVIEW_PRESENCE_KEYS = {"review", "reviews", "reviewDetails", "challenge", "challenged"}
 PITCH_CALL_KEYWORDS = {"called strike", "called ball", "to strike", "to ball", "strike", "ball", "zone"}
+ABS_REVIEW_TYPE_CODES = {"mj"}
 EXCLUDED_KEYWORDS = {"hit by pitch", "hbp"}
 OVERTURNED_KEYWORDS = {"overturned", "reversed", "changed", "flipped"}
 CONFIRMED_KEYWORDS = {"confirmed", "upheld", "stands", "call stands"}
@@ -251,6 +253,7 @@ class ABSService:
             return False
 
         review_type = self._extract_review_type(play).lower()
+        has_mj_review_type = review_type in ABS_REVIEW_TYPE_CODES
         if any(t in review_type for t in NON_ABS_REVIEW_TYPES):
             return False
 
@@ -262,10 +265,11 @@ class ABSService:
         has_pitch_event = any("pitchData" in event for event in play.get("playEvents", []) if isinstance(event, dict))
         final_call = self._infer_final_call(play)
         has_abs_review_metadata = self._has_abs_review_metadata(play)
+        has_review_marker = self._has_review_marker(play)
         has_pitch_evidence = has_pitch_call or has_pitch_event or final_call is not None
-        return (
-            has_challenge_marker
-            and (has_abs_context or has_abs_review_metadata)
+        return has_mj_review_type or (
+            (has_challenge_marker or has_review_marker)
+            and (has_abs_context or has_abs_review_metadata or has_review_marker)
             and has_pitch_evidence
         )
 
@@ -313,8 +317,7 @@ class ABSService:
         return "ABS challenge"
 
     def _extract_review_type(self, play: Dict[str, Any]) -> str:
-        review = play.get("review")
-        if isinstance(review, dict):
+        for review in self._review_nodes(play):
             for key in ("reviewType", "type", "description", "details"):
                 value = review.get(key)
                 if isinstance(value, str) and value.strip():
@@ -326,20 +329,32 @@ class ABSService:
         return ""
 
     def _has_abs_review_metadata(self, play: Dict[str, Any]) -> bool:
-        review = play.get("review")
-        if not isinstance(review, dict):
-            return False
-
-        review_blob = self._recursive_strings(review)
-        if any("ball" in chunk.lower() and "strike" in chunk.lower() for chunk in review_blob if isinstance(chunk, str)):
-            return True
-        if any("abs" in chunk.lower() for chunk in review_blob if isinstance(chunk, str)):
-            return True
-
-        for key in ("isOverturned", "overturned"):
-            if isinstance(review.get(key), bool):
+        for review in self._review_nodes(play):
+            review_blob = self._recursive_strings(review)
+            if any("ball" in chunk.lower() and "strike" in chunk.lower() for chunk in review_blob if isinstance(chunk, str)):
                 return True
+            if any("abs" in chunk.lower() for chunk in review_blob if isinstance(chunk, str)):
+                return True
+            if str(review.get("reviewType", "")).lower() in ABS_REVIEW_TYPE_CODES:
+                return True
+
+            for key in ("isOverturned", "overturned"):
+                if isinstance(review.get(key), bool):
+                    return True
         return False
+
+    def _has_review_marker(self, play: Dict[str, Any]) -> bool:
+        if isinstance(play.get("review"), dict):
+            return True
+        if isinstance(play.get("reviewDetails"), dict):
+            return True
+
+        for key in REVIEW_PRESENCE_KEYS:
+            if key in play:
+                return True
+
+        text = self._collect_play_text(play).lower()
+        return "review" in text
 
     def _infer_review_outcome(self, play: Dict[str, Any]) -> Tuple[Optional[bool], Optional[bool]]:
         text = self._collect_play_text(play).lower()
@@ -348,8 +363,7 @@ class ABSService:
         if any(k in text for k in CONFIRMED_KEYWORDS):
             return False, True
 
-        review = play.get("review")
-        if isinstance(review, dict):
+        for review in self._review_nodes(play):
             for key in ("isOverturned", "overturned"):
                 value = review.get(key)
                 if isinstance(value, bool):
@@ -364,13 +378,35 @@ class ABSService:
                     if any(k in normalized for k in CONFIRMED_KEYWORDS):
                         return False, True
 
-            # Feed payloads sometimes provide review metadata without explicit
-            # "confirmed/overturned" wording. If the play is already identified
-            # as an ABS challenge and review data is present, treat it as confirmed.
-            if self._has_abs_review_metadata(play):
-                return False, True
+        # Feed payloads sometimes provide review metadata without explicit
+        # "confirmed/overturned" wording. If the play is already identified
+        # as an ABS challenge and review data is present, treat it as confirmed.
+        if self._has_abs_review_metadata(play):
+            return False, True
 
         return None, None
+
+    def _review_nodes(self, play: Dict[str, Any]) -> List[Dict[str, Any]]:
+        nodes: List[Dict[str, Any]] = []
+        for key in ("review", "reviewDetails"):
+            node = play.get(key)
+            if isinstance(node, dict):
+                nodes.append(node)
+
+        for event in play.get("playEvents", []):
+            if not isinstance(event, dict):
+                continue
+            event_review = event.get("reviewDetails")
+            if isinstance(event_review, dict):
+                nodes.append(event_review)
+
+            details = event.get("details")
+            if isinstance(details, dict):
+                details_review = details.get("reviewDetails")
+                if isinstance(details_review, dict):
+                    nodes.append(details_review)
+
+        return nodes
 
     def _infer_challenger(self, play: Dict[str, Any]) -> Tuple[Optional[int], str, Optional[str]]:
         text = self._collect_play_text(play).lower()
