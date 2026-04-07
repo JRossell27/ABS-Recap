@@ -17,6 +17,7 @@ MAX_ATTEMPTS="${MAX_ATTEMPTS:-6}"
 SLEEP_SECONDS="${SLEEP_SECONDS:-20}"
 POST_DEPLOY_WAIT_SECONDS="${POST_DEPLOY_WAIT_SECONDS:-10}"
 POST_DEPLOY_MAX_CHECKS="${POST_DEPLOY_MAX_CHECKS:-12}"
+MIN_RUNNING_MACHINES="${MIN_RUNNING_MACHINES:-2}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -72,6 +73,7 @@ print(started)
 PY
 )"
 
+      if [[ "${started_count:-0}" -ge "$MIN_RUNNING_MACHINES" ]]; then
       if [[ "${started_count:-0}" -ge 1 ]]; then
         echo "Found ${started_count} started machine(s); app should be routable."
         return 0
@@ -90,6 +92,11 @@ if candidate:
 PY
 )"
       if [[ -n "${machine_id_to_start:-}" ]]; then
+        echo "Only ${started_count:-0} started machine(s); attempting to start machine ${machine_id_to_start}."
+        flyctl machine start "$machine_id_to_start" -a "$APP" || true
+      else
+        echo "No existing machine available to start; requesting Fly to keep ${MIN_RUNNING_MACHINES} machines running."
+        flyctl scale count "$MIN_RUNNING_MACHINES" -a "$APP" || true
         echo "No started machines found; attempting to start machine ${machine_id_to_start}."
         flyctl machine start "$machine_id_to_start" -a "$APP" || true
       else
