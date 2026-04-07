@@ -160,7 +160,7 @@ def test_season_starts_on_march_25():
         return []
 
     svc._fetch_schedule_date_range = fake_fetch
-    svc._collect_events_from_games = lambda games: ([], 0)
+    svc._collect_events_from_games = lambda games, **kwargs: ([], 0)
     svc.get_season_leaderboard(season=2026, run_date=__import__("datetime").date(2026, 4, 6))
     assert start["value"] == __import__("datetime").date(2026, 3, 25)
     assert end["value"] == __import__("datetime").date(2026, 4, 5)
@@ -183,6 +183,56 @@ def test_build_player_rows_keeps_roles_separate():
 
     assert hitters[0]["total"] == 2
     assert fielders[0]["total"] == 1
+
+
+def test_daily_recap_only_uses_games_starting_on_target_eastern_date():
+    svc = ABSService()
+    captured = {}
+
+    games = [
+        {"gamePk": 1, "gameDate": "2026-04-06T23:10:00Z"},  # Apr 6 ET
+        {"gamePk": 2, "gameDate": "2026-04-07T01:10:00Z"},  # Apr 6 ET
+        {"gamePk": 3, "gameDate": "2026-04-07T05:10:00Z"},  # Apr 7 ET (exclude)
+    ]
+
+    svc._fetch_schedule_for_date = lambda _target: games
+
+    def fake_collect(found_games, **kwargs):
+        captured["games"] = [g["gamePk"] for g in found_games if svc._game_start_date_eastern(g) == kwargs.get("target_date")]
+        captured["target"] = kwargs.get("target_date")
+        return [], 0
+
+    svc._collect_events_from_games = fake_collect
+    svc.get_daily_recap(run_date=__import__("datetime").date(2026, 4, 7))
+
+    assert captured["target"] == __import__("datetime").date(2026, 4, 6)
+    assert captured["games"] == [1, 2]
+
+
+def test_collect_events_filters_to_season_date_window_by_eastern_start():
+    svc = ABSService()
+    scanned = []
+
+    games = [
+        {"gamePk": 10, "gameDate": "2026-03-25T17:05:00Z"},
+        {"gamePk": 11, "gameDate": "2026-03-24T23:55:00Z"},  # outside start window
+        {"gamePk": 12, "gameDate": "2026-04-07T03:59:00Z"},  # Apr 6 ET
+        {"gamePk": 13, "gameDate": "2026-04-07T04:01:00Z"},  # Apr 7 ET outside end window
+    ]
+
+    svc._fetch_game_feed = lambda game_pk: scanned.append(game_pk) or {
+        "liveData": {"plays": {"allPlays": []}},
+        "gameData": {"teams": {"away": {"abbreviation": "A"}, "home": {"abbreviation": "H"}}},
+    }
+    svc._parse_game_events = lambda _feed, _pk: []
+
+    svc._collect_events_from_games(
+        games,
+        start_date=__import__("datetime").date(2026, 3, 25),
+        end_date=__import__("datetime").date(2026, 4, 6),
+    )
+
+    assert scanned == [10, 12]
 
 
 def test_daily_message_has_role_breakout_and_no_key_moments():

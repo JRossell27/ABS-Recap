@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import requests
+from zoneinfo import ZoneInfo
 
 MLB_BASE_URL = "https://statsapi.mlb.com/api/v1"
 MLB_FEED_URL = "https://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live"
@@ -27,6 +28,7 @@ EXCLUDED_KEYWORDS = {"hit by pitch", "hbp"}
 OVERTURNED_KEYWORDS = {"overturned", "reversed", "changed", "flipped"}
 CONFIRMED_KEYWORDS = {"confirmed", "upheld", "stands", "call stands"}
 NON_ABS_REVIEW_TYPES = {"manager challenge", "replay review", "umpire review"}
+EASTERN = ZoneInfo("America/New_York")
 
 
 @dataclass
@@ -48,11 +50,11 @@ class ABSService:
         self.session = session or requests.Session()
 
     def get_daily_recap(self, run_date: Optional[date] = None) -> Dict[str, Any]:
-        today = run_date or date.today()
+        today = run_date or self._today_eastern()
         target_date = today - timedelta(days=1)
 
         games = self._fetch_schedule_for_date(target_date)
-        events, failed_games = self._collect_events_from_games(games)
+        events, failed_games = self._collect_events_from_games(games, target_date=target_date)
 
         overturned = sum(1 for event in events if event.overturned)
         confirmed = sum(1 for event in events if event.confirmed)
@@ -78,7 +80,7 @@ class ABSService:
         top_n: int = 3,
         run_date: Optional[date] = None,
     ) -> Dict[str, Any]:
-        today = run_date or date.today()
+        today = run_date or self._today_eastern()
         use_season = season or today.year
 
         start_date = date(use_season, 3, 25)
@@ -87,7 +89,7 @@ class ABSService:
             end_date = start_date
 
         games = self._fetch_schedule_date_range(start_date, end_date)
-        events, failed_games = self._collect_events_from_games(games)
+        events, failed_games = self._collect_events_from_games(games, start_date=start_date, end_date=end_date)
 
         hitter_total = sum(1 for event in events if event.role == "hitter")
         fielder_total = sum(1 for event in events if event.role == "fielder")
@@ -187,13 +189,26 @@ class ABSService:
             games.extend(day.get("games", []))
         return games
 
-    def _collect_events_from_games(self, games: Iterable[Dict[str, Any]]) -> Tuple[List[ChallengeEvent], int]:
+    def _collect_events_from_games(
+        self,
+        games: Iterable[Dict[str, Any]],
+        target_date: Optional[date] = None,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ) -> Tuple[List[ChallengeEvent], int]:
         events: List[ChallengeEvent] = []
         failed_games = 0
 
         for game in games:
             game_pk = game.get("gamePk")
             if not game_pk:
+                continue
+            game_start_date_eastern = self._game_start_date_eastern(game)
+            if target_date and game_start_date_eastern != target_date:
+                continue
+            if start_date and game_start_date_eastern and game_start_date_eastern < start_date:
+                continue
+            if end_date and game_start_date_eastern and game_start_date_eastern > end_date:
                 continue
             try:
                 feed = self._fetch_game_feed(game_pk)
@@ -208,6 +223,22 @@ class ABSService:
         response = self.session.get(MLB_FEED_URL.format(game_pk=game_pk), timeout=30)
         response.raise_for_status()
         return response.json()
+
+    def _today_eastern(self) -> date:
+        return datetime.now(tz=EASTERN).date()
+
+    def _game_start_date_eastern(self, game: Dict[str, Any]) -> Optional[date]:
+        game_date = game.get("gameDate")
+        if not isinstance(game_date, str) or not game_date.strip():
+            return None
+        normalized = game_date.strip().replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(EASTERN).date()
 
     def _parse_game_events(self, feed: Dict[str, Any], game_pk: int) -> List[ChallengeEvent]:
         plays = feed.get("liveData", {}).get("plays", {}).get("allPlays", [])
