@@ -274,6 +274,12 @@ class ABSService:
         has_challenge_or_review = has_challenge_marker or has_review_marker
         has_abs_signal = has_abs_context or has_abs_review_metadata or has_review_marker
         return has_challenge_or_review and has_abs_signal and has_pitch_evidence
+        return has_mj_review_type or (
+        return (
+            (has_challenge_marker or has_review_marker)
+            and (has_abs_context or has_abs_review_metadata or has_review_marker)
+            and has_pitch_evidence
+        )
 
     def _collect_play_text(self, play: Dict[str, Any]) -> str:
         chunks: List[str] = []
@@ -349,6 +355,17 @@ class ABSService:
         if isinstance(play.get("review"), dict):
             return True
         if isinstance(play.get("reviewDetails"), dict):
+            return True
+
+        for key in REVIEW_PRESENCE_KEYS:
+            if key in play:
+                return True
+
+        text = self._collect_play_text(play).lower()
+        return "review" in text
+
+    def _has_review_marker(self, play: Dict[str, Any]) -> bool:
+        if isinstance(play.get("review"), dict):
             return True
 
         for key in REVIEW_PRESENCE_KEYS:

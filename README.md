@@ -55,6 +55,9 @@ It also runs a Python syntax preflight (`python -m py_compile app.py abs_service
 
 4. Ensure at least **two** machines are running (recommended for zero-downtime routing during deploys):
 
+4. Ensure at least **two** machines are running (recommended for zero-downtime routing during deploys):
+4. Ensure at least one machine is running:
+
 ```bash
 fly machines list
 fly scale count 2
