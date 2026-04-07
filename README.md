@@ -22,7 +22,7 @@ Open: `http://localhost:8080`
 ## Fly.io deployment (bare-bones)
 This repository is now intentionally minimal for Fly deploy stability:
 - Python 3.12 slim image
-- single process (`python -u app.py`)
+- production web process via Gunicorn (`gunicorn --bind 0.0.0.0:$PORT app:app`)
 - internal port `8080`
 - one always-on machine (`min_machines_running = 1`)
 

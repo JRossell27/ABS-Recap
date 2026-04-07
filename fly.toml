@@ -17,3 +17,10 @@ primary_region = "ord"
 [[vm]]
   size = "shared-cpu-1x"
   memory = "256mb"
+
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "30s"
+  method = "get"
+  timeout = "5s"
+  path = "/healthz"
