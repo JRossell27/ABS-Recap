@@ -20,6 +20,7 @@ ABS_CONTEXT_KEYWORDS = {
     "pitch challenge",
 }
 CHALLENGE_KEYWORDS = {"challenge", "challenged"}
+REVIEW_PRESENCE_KEYS = {"review", "reviews", "reviewDetails", "challenge", "challenged"}
 PITCH_CALL_KEYWORDS = {"called strike", "called ball", "to strike", "to ball", "strike", "ball", "zone"}
 EXCLUDED_KEYWORDS = {"hit by pitch", "hbp"}
 OVERTURNED_KEYWORDS = {"overturned", "reversed", "changed", "flipped"}
@@ -262,10 +263,11 @@ class ABSService:
         has_pitch_event = any("pitchData" in event for event in play.get("playEvents", []) if isinstance(event, dict))
         final_call = self._infer_final_call(play)
         has_abs_review_metadata = self._has_abs_review_metadata(play)
+        has_review_marker = self._has_review_marker(play)
         has_pitch_evidence = has_pitch_call or has_pitch_event or final_call is not None
         return (
-            has_challenge_marker
-            and (has_abs_context or has_abs_review_metadata)
+            (has_challenge_marker or has_review_marker)
+            and (has_abs_context or has_abs_review_metadata or has_review_marker)
             and has_pitch_evidence
         )
 
@@ -340,6 +342,17 @@ class ABSService:
             if isinstance(review.get(key), bool):
                 return True
         return False
+
+    def _has_review_marker(self, play: Dict[str, Any]) -> bool:
+        if isinstance(play.get("review"), dict):
+            return True
+
+        for key in REVIEW_PRESENCE_KEYS:
+            if key in play:
+                return True
+
+        text = self._collect_play_text(play).lower()
+        return "review" in text
 
     def _infer_review_outcome(self, play: Dict[str, Any]) -> Tuple[Optional[bool], Optional[bool]]:
         text = self._collect_play_text(play).lower()

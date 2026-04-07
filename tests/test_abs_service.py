@@ -56,6 +56,20 @@ def test_detects_abs_challenge_with_sparse_review_text():
     assert svc._is_abs_pitch_challenge(play) is True
 
 
+def test_detects_pitch_call_review_without_explicit_abs_keyword():
+    svc = ABSService()
+    play = _play("Challenge on called strike, call stands", include_pitch=True)
+    play["review"] = {"decision": "call stands"}
+    assert svc._is_abs_pitch_challenge(play) is True
+
+
+def test_excludes_generic_non_pitch_reviews():
+    svc = ABSService()
+    play = _play("Safe/out challenge at first base", include_pitch=False)
+    play["review"] = {"reviewType": "Replay Review"}
+    assert svc._is_abs_pitch_challenge(play) is False
+
+
 def test_role_split_hitter_vs_fielder():
     svc = ABSService()
 
