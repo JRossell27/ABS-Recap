@@ -354,11 +354,22 @@ class ABSService:
             return True
 
         for key in REVIEW_PRESENCE_KEYS:
-            if key in play:
+            if self._has_meaningful_review_value(play.get(key)):
                 return True
 
         text = self._collect_play_text(play).lower()
         return "review" in text
+
+    def _has_meaningful_review_value(self, value: Any) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return bool(value.strip())
+        if isinstance(value, (list, tuple, set, dict)):
+            return len(value) > 0
+        return True
 
     def _infer_review_outcome(self, play: Dict[str, Any]) -> Tuple[Optional[bool], Optional[bool]]:
         text = self._collect_play_text(play).lower()
