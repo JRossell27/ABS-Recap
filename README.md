@@ -19,10 +19,14 @@ python app.py
 
 Open: `http://localhost:8080`
 
-## Fly.io deployment (GitHub + Fly)
-This repository includes a `Dockerfile` and `fly.toml` configured to run Gunicorn on `0.0.0.0:8080` with a `/healthz` check.
+## Fly.io deployment (bare-bones)
+This repository is now intentionally minimal for Fly deploy stability:
+- Python 3.12 slim image
+- single process (`python -u app.py`)
+- internal port `8080`
+- one always-on machine (`min_machines_running = 1`)
 
-1. Create or verify the Fly app (one-time):
+1. Create the Fly app (one-time):
 
 ```bash
 fly apps create abs-recap
@@ -35,47 +39,24 @@ fly secrets set DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
 fly secrets set FLASK_SECRET_KEY="$(openssl rand -hex 32)"
 ```
 
-3. Deploy from GitHub or local:
+3. Deploy:
 
 ```bash
 fly deploy
 ```
 
-If Fly returns a temporary machine lease error during rolling updates (for example `lease currently held`), use the retry wrapper:
+4. Validate runtime:
 
 ```bash
-./scripts/fly_deploy_retry.sh \
-  --app abs-recap \
-  --image registry.fly.io/abs-recap:deployment-<tag> \
-  --config fly.toml
-```
-
-The retry wrapper now also validates post-deploy machine state and will auto-start/scale a machine if Fly reports no healthy routing candidates (for example proxy errors about no machines to route requests).
-It also runs a Python syntax preflight (`python -m py_compile app.py abs_service.py`) before deploy so worker-boot syntax crashes are caught before shipping.
-
-4. Ensure at least **two** machines are running (recommended for zero-downtime routing during deploys):
-
-4. Ensure at least **two** machines are running (recommended for zero-downtime routing during deploys):
-4. Ensure at least one machine is running:
-
-```bash
-fly machines list
-fly scale count 2
-```
-
-5. Debug checks/logs if needed:
-
-```bash
-fly logs
 fly status
+fly logs
+fly checks list
 ```
 
 Notes:
-- App binds to `PORT` (default `8080`) for Fly runtime compatibility.
-- `fly.toml` is set to `min_machines_running = 2`, `auto_stop_machines = "off"`, and `deploy.strategy = "rolling"` so Fly can keep traffic routable while replacing machines.
-- Gunicorn is configured conservatively (`WEB_CONCURRENCY=1`, `GUNICORN_THREADS=4`) to reduce memory pressure and avoid worker over-allocation.
-- VM memory is set to `1gb` to avoid Fly machine restart loops caused by memory pressure during app boot/runtime.
-- If you define a Fly `[processes]` command, avoid `${VAR}` placeholders there: Fly runs it directly and does **not** do shell interpolation. This can cause errors like `invalid int value: '${WEB_CONCURRENCY}'`.
+- App binds to `PORT` (default `8080`) in `app.py`.
+- Health endpoint is `GET /healthz`.
+- Keep infra simple first; scale memory/count only after stable deploys.
 
 ## Parsing approach
 Because ABS feed fields are still evolving, challenge detection is rule-based:
