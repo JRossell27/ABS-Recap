@@ -285,28 +285,26 @@ class ABSService:
         if any(k in text for k in EXCLUDED_KEYWORDS):
             return False
 
-        review_type = self._extract_review_type(play).lower()
-        has_mj_review_type = review_type in ABS_REVIEW_TYPE_CODES
-        if any(t in review_type for t in NON_ABS_REVIEW_TYPES):
+        reviews = self._review_nodes(play)
+        if not reviews:
             return False
 
-        has_challenge_marker = any(k in text for k in CHALLENGE_KEYWORDS)
-        has_abs_context = any(k in text for k in ABS_CONTEXT_KEYWORDS) or any(
-            k in review_type for k in ABS_CONTEXT_KEYWORDS
-        )
-        has_pitch_call = any(k in text for k in PITCH_CALL_KEYWORDS)
-        has_pitch_event = any("pitchData" in event for event in play.get("playEvents", []) if isinstance(event, dict))
-        final_call = self._infer_final_call(play)
-        has_abs_review_metadata = self._has_abs_review_metadata(play)
-        has_review_marker = self._has_review_marker(play)
-        has_pitch_evidence = has_pitch_call or has_pitch_event or final_call is not None
+        has_completed_mj_review = False
+        for review in reviews:
+            review_type = str(review.get("reviewType", "")).strip().lower()
+            if any(t in review_type for t in NON_ABS_REVIEW_TYPES):
+                continue
+            if review_type not in ABS_REVIEW_TYPE_CODES:
+                continue
 
-        if has_mj_review_type:
-            return True
+            in_progress = review.get("inProgress")
+            if in_progress is True:
+                continue
 
-        has_challenge_or_review = has_challenge_marker or has_review_marker
-        has_abs_signal = has_abs_context or has_abs_review_metadata
-        return has_challenge_or_review and has_abs_signal and has_pitch_evidence
+            has_completed_mj_review = True
+            break
+
+        return has_completed_mj_review
 
     def _collect_play_text(self, play: Dict[str, Any]) -> str:
         chunks: List[str] = []
@@ -423,12 +421,6 @@ class ABSService:
                         return True, False
                     if any(k in normalized for k in CONFIRMED_KEYWORDS):
                         return False, True
-
-        # Feed payloads sometimes provide review metadata without explicit
-        # "confirmed/overturned" wording. If the play is already identified
-        # as an ABS challenge and review data is present, treat it as confirmed.
-        if self._has_abs_review_metadata(play):
-            return False, True
 
         return None, None
 
