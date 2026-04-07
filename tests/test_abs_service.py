@@ -84,6 +84,14 @@ def test_excludes_generic_pitch_review_without_abs_signal():
     assert svc._is_abs_pitch_challenge(play) is False
 
 
+def test_empty_review_keys_do_not_count_as_review_marker():
+    svc = ABSService()
+    play = _play("Called strike in the strike zone", include_pitch=True)
+    play["reviews"] = []
+    play["challenge"] = False
+    assert svc._is_abs_pitch_challenge(play) is False
+
+
 def test_role_split_hitter_vs_fielder():
     svc = ABSService()
 
