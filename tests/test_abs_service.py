@@ -23,16 +23,17 @@ def test_excludes_hbp_challenges():
     assert svc._is_abs_pitch_challenge(play) is False
 
 
-def test_detects_pitch_challenge():
+def test_detects_pitch_challenge_with_mj_review_type():
     svc = ABSService()
     play = _play("ABS challenge overturned to ball")
+    play["reviewDetails"] = {"reviewType": "MJ", "inProgress": False, "isOverturned": True}
     assert svc._is_abs_pitch_challenge(play) is True
 
 
-def test_detects_pitch_challenge_without_pitchdata_when_call_text_present():
+def test_requires_mj_review_type_not_just_text():
     svc = ABSService()
     play = _play("ABS challenge confirmed called strike", include_pitch=False)
-    assert svc._is_abs_pitch_challenge(play) is True
+    assert svc._is_abs_pitch_challenge(play) is False
 
 
 def test_excludes_non_abs_review_types():
@@ -42,25 +43,18 @@ def test_excludes_non_abs_review_types():
     assert svc._is_abs_pitch_challenge(play) is False
 
 
-def test_detects_abs_challenge_from_review_metadata_without_abs_text():
+def test_non_mj_review_types_do_not_count_as_abs_challenges():
     svc = ABSService()
     play = _play("Challenge confirmed called strike")
     play["review"] = {"reviewType": "Ball/Strike Review", "isOverturned": False}
-    assert svc._is_abs_pitch_challenge(play) is True
+    assert svc._is_abs_pitch_challenge(play) is False
 
 
-def test_detects_abs_challenge_with_sparse_review_text():
+def test_excludes_mj_review_while_in_progress():
     svc = ABSService()
-    play = _play("Challenge", include_pitch=True)
-    play["review"] = {"reviewType": "Ball/Strike Review", "status": "Complete"}
-    assert svc._is_abs_pitch_challenge(play) is True
-
-
-def test_detects_pitch_call_review_without_explicit_abs_keyword():
-    svc = ABSService()
-    play = _play("Challenge on called strike, call stands", include_pitch=True)
-    play["review"] = {"reviewType": "Ball/Strike Review", "decision": "call stands"}
-    assert svc._is_abs_pitch_challenge(play) is True
+    play = _play("Challenge in progress", include_pitch=True)
+    play["reviewDetails"] = {"reviewType": "MJ", "inProgress": True}
+    assert svc._is_abs_pitch_challenge(play) is False
 
 
 def test_detects_mj_reviewtype_without_abs_text_or_pitchdata():
@@ -136,11 +130,11 @@ def test_parse_game_events_skips_challenges_without_outcome():
     assert events == []
 
 
-def test_review_metadata_defaults_outcome_to_confirmed():
+def test_missing_outcome_returns_unknown():
     svc = ABSService()
     play = _play("Challenge", include_pitch=True)
-    play["review"] = {"reviewType": "Ball/Strike Review", "status": "Complete"}
-    assert svc._infer_review_outcome(play) == (False, True)
+    play["reviewDetails"] = {"reviewType": "MJ", "inProgress": False}
+    assert svc._infer_review_outcome(play) == (None, None)
 
 
 def test_infers_outcome_from_playevent_reviewdetails():
