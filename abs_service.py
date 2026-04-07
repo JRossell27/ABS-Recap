@@ -267,6 +267,13 @@ class ABSService:
         has_abs_review_metadata = self._has_abs_review_metadata(play)
         has_review_marker = self._has_review_marker(play)
         has_pitch_evidence = has_pitch_call or has_pitch_event or final_call is not None
+
+        if has_mj_review_type:
+            return True
+
+        has_challenge_or_review = has_challenge_marker or has_review_marker
+        has_abs_signal = has_abs_context or has_abs_review_metadata or has_review_marker
+        return has_challenge_or_review and has_abs_signal and has_pitch_evidence
         return has_mj_review_type or (
         return (
             (has_challenge_marker or has_review_marker)
