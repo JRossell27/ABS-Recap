@@ -80,7 +80,6 @@ PY
 )"
 
       if [[ "${started_count:-0}" -ge "$MIN_RUNNING_MACHINES" ]]; then
-      if [[ "${started_count:-0}" -ge 1 ]]; then
         echo "Found ${started_count} started machine(s); app should be routable."
         return 0
       fi
@@ -103,11 +102,6 @@ PY
       else
         echo "No existing machine available to start; requesting Fly to keep ${MIN_RUNNING_MACHINES} machines running."
         flyctl scale count "$MIN_RUNNING_MACHINES" -a "$APP" || true
-        echo "No started machines found; attempting to start machine ${machine_id_to_start}."
-        flyctl machine start "$machine_id_to_start" -a "$APP" || true
-      else
-        echo "No existing machine available to start; requesting Fly to keep one machine running."
-        flyctl scale count 1 -a "$APP" || true
       fi
     else
       echo "Unable to list machines yet; retrying."
