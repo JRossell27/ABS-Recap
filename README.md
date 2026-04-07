@@ -50,11 +50,14 @@ If Fly returns a temporary machine lease error during rolling updates (for examp
   --config fly.toml
 ```
 
-4. Ensure at least one machine is running:
+The retry wrapper now also validates post-deploy machine state and will auto-start/scale a machine if Fly reports no healthy routing candidates (for example proxy errors about no machines to route requests).
+It also runs a Python syntax preflight (`python -m py_compile app.py abs_service.py`) before deploy so worker-boot syntax crashes are caught before shipping.
+
+4. Ensure at least **two** machines are running (recommended for zero-downtime routing during deploys):
 
 ```bash
 fly machines list
-fly scale count 1
+fly scale count 2
 ```
 
 5. Debug checks/logs if needed:
@@ -66,7 +69,7 @@ fly status
 
 Notes:
 - App binds to `PORT` (default `8080`) for Fly runtime compatibility.
-- `fly.toml` is set to `min_machines_running = 1` and `auto_stop_machines = "off"` to avoid ending up with zero machines.
+- `fly.toml` is set to `min_machines_running = 2`, `auto_stop_machines = "off"`, and `deploy.strategy = "rolling"` so Fly can keep traffic routable while replacing machines.
 - Gunicorn is configured conservatively (`WEB_CONCURRENCY=1`, `GUNICORN_THREADS=4`) to reduce memory pressure and avoid worker over-allocation.
 - VM memory is set to `1gb` to avoid Fly machine restart loops caused by memory pressure during app boot/runtime.
 - If you define a Fly `[processes]` command, avoid `${VAR}` placeholders there: Fly runs it directly and does **not** do shell interpolation. This can cause errors like `invalid int value: '${WEB_CONCURRENCY}'`.
