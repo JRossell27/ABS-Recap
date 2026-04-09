@@ -32,11 +32,11 @@ NON_ABS_REVIEW_TYPES = {"manager challenge", "replay review", "umpire review"}
 EASTERN = ZoneInfo("America/New_York")
 ABS_CHALLENGE_WORDING_RE = re.compile(
     r"\b(?P<family>Ball|Strike)\s+(?P<number>\d+)\s+call\s+"
-    r"(?P<status>overturned|confirmed)\s+after\s+ABS\s+challenge\b",
+    r"(?P<status>overturned|confirmed|upheld|stands|call stands)\s+after\s+ABS\s+challenge\b",
     re.IGNORECASE,
 )
 ABS_CHALLENGE_RESULT_RE = re.compile(
-    r"\bABS\s+challenge\b.*\bcall\s+(?P<status>overturned|confirmed)\b",
+    r"\bABS\s+challenge\b.*\bcall\s+(?P<status>overturned|confirmed|upheld|stands|call stands)\b",
     re.IGNORECASE,
 )
 
@@ -326,7 +326,7 @@ class ABSService:
             return None
 
         family = match.group("family").strip().lower()
-        status = match.group("status").strip().lower()
+        status = self._normalize_abs_status(match.group("status"))
         try:
             number = int(match.group("number"))
         except (TypeError, ValueError):
@@ -339,7 +339,13 @@ class ABSService:
         match = ABS_CHALLENGE_RESULT_RE.search(text)
         if not match:
             return None
-        return match.group("status").strip().lower()
+        return self._normalize_abs_status(match.group("status"))
+
+    def _normalize_abs_status(self, status: Any) -> str:
+        normalized = str(status or "").strip().lower()
+        if normalized in {"upheld", "stands", "call stands"}:
+            return "confirmed"
+        return normalized
 
     def _collect_play_text(self, play: Dict[str, Any]) -> str:
         chunks: List[str] = []
