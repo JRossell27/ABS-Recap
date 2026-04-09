@@ -296,6 +296,7 @@ class ABSService:
             return False
 
         if self._extract_abs_call_phrase(play) or self._extract_abs_result_phrase(play):
+        if self._extract_abs_call_phrase(play):
             return True
 
         reviews = self._review_nodes(play)
