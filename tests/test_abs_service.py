@@ -64,6 +64,21 @@ def test_detects_mj_reviewtype_without_abs_text_or_pitchdata():
     assert svc._is_abs_pitch_challenge(play) is True
 
 
+def test_detects_public_abs_wording_without_review_nodes():
+    svc = ABSService()
+    play = _play("Strike 1 call overturned after ABS challenge", include_pitch=False)
+    play.pop("playEvents")
+    play["playEvents"] = [{"details": {"description": "Strike 1 call overturned after ABS challenge"}}]
+    assert svc._is_abs_pitch_challenge(play) is True
+
+
+def test_detects_generic_abs_result_wording():
+    svc = ABSService()
+    play = _play("ABS Challenge - Successful, call overturned", include_pitch=False)
+    assert svc._is_abs_pitch_challenge(play) is True
+    assert svc._infer_review_outcome(play) == (True, False)
+
+
 def test_excludes_generic_non_pitch_reviews():
     svc = ABSService()
     play = _play("Safe/out challenge at first base", include_pitch=False)
@@ -118,6 +133,22 @@ def test_role_inference_from_final_call_and_overturn_status():
     overturned_to_ball = _play("ABS challenge overturned called strike to ball")
     _, _, role_overturned_to_ball = svc._infer_challenger(overturned_to_ball)
     assert role_overturned_to_ball == "hitter"
+
+
+def test_role_inference_from_public_abs_phrase():
+    svc = ABSService()
+
+    strike_overturned = _play("Strike 1 call overturned after ABS challenge", include_pitch=False)
+    _, _, strike_overturned_role = svc._infer_challenger(strike_overturned)
+    assert strike_overturned_role == "hitter"
+
+    ball_overturned = _play("Ball 3 call overturned after ABS challenge", include_pitch=False)
+    _, _, ball_overturned_role = svc._infer_challenger(ball_overturned)
+    assert ball_overturned_role == "fielder"
+
+    strike_confirmed = _play("Strike 3 call confirmed after ABS challenge", include_pitch=False)
+    _, _, strike_confirmed_role = svc._infer_challenger(strike_confirmed)
+    assert strike_confirmed_role == "hitter"
 
 
 def test_parse_game_events_skips_challenges_without_outcome():

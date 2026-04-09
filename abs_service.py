@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import requests
@@ -29,6 +30,15 @@ OVERTURNED_KEYWORDS = {"overturned", "reversed", "changed", "flipped"}
 CONFIRMED_KEYWORDS = {"confirmed", "upheld", "stands", "call stands"}
 NON_ABS_REVIEW_TYPES = {"manager challenge", "replay review", "umpire review"}
 EASTERN = ZoneInfo("America/New_York")
+ABS_CHALLENGE_WORDING_RE = re.compile(
+    r"\b(?P<family>Ball|Strike)\s+(?P<number>\d+)\s+call\s+"
+    r"(?P<status>overturned|confirmed)\s+after\s+ABS\s+challenge\b",
+    re.IGNORECASE,
+)
+ABS_CHALLENGE_RESULT_RE = re.compile(
+    r"\bABS\s+challenge\b.*\bcall\s+(?P<status>overturned|confirmed)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -285,6 +295,9 @@ class ABSService:
         if any(k in text for k in EXCLUDED_KEYWORDS):
             return False
 
+        if self._extract_abs_call_phrase(play) or self._extract_abs_result_phrase(play):
+            return True
+
         reviews = self._review_nodes(play)
         if not reviews:
             return False
@@ -305,6 +318,28 @@ class ABSService:
             break
 
         return has_completed_mj_review
+
+    def _extract_abs_call_phrase(self, play: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        text = self._collect_play_text(play)
+        match = ABS_CHALLENGE_WORDING_RE.search(text)
+        if not match:
+            return None
+
+        family = match.group("family").strip().lower()
+        status = match.group("status").strip().lower()
+        try:
+            number = int(match.group("number"))
+        except (TypeError, ValueError):
+            number = None
+
+        return {"family": family, "number": number, "status": status}
+
+    def _extract_abs_result_phrase(self, play: Dict[str, Any]) -> Optional[str]:
+        text = self._collect_play_text(play)
+        match = ABS_CHALLENGE_RESULT_RE.search(text)
+        if not match:
+            return None
+        return match.group("status").strip().lower()
 
     def _collect_play_text(self, play: Dict[str, Any]) -> str:
         chunks: List[str] = []
@@ -402,6 +437,12 @@ class ABSService:
 
     def _infer_review_outcome(self, play: Dict[str, Any]) -> Tuple[Optional[bool], Optional[bool]]:
         text = self._collect_play_text(play).lower()
+        abs_result_status = self._extract_abs_result_phrase(play)
+        if abs_result_status == "overturned":
+            return True, False
+        if abs_result_status == "confirmed":
+            return False, True
+
         if any(k in text for k in OVERTURNED_KEYWORDS):
             return True, False
         if any(k in text for k in CONFIRMED_KEYWORDS):
@@ -451,6 +492,7 @@ class ABSService:
         batter = play.get("matchup", {}).get("batter", {})
         pitcher = play.get("matchup", {}).get("pitcher", {})
         overturned = any(k in text for k in OVERTURNED_KEYWORDS)
+        abs_phrase = self._extract_abs_call_phrase(play)
         final_call = self._infer_final_call(play)
 
         if any(marker in text for marker in ("batter challenge", "hitter challenge", "challenged by batter")):
@@ -468,6 +510,20 @@ class ABSService:
         if "confirmed called ball" in text or "call stands as ball" in text:
             return pitcher.get("id"), pitcher.get("fullName", "Unknown Fielder"), "fielder"
 
+        if abs_phrase:
+            original_family = abs_phrase.get("family")
+            status = abs_phrase.get("status")
+            if status == "overturned":
+                if original_family == "strike":
+                    return batter.get("id"), batter.get("fullName", "Unknown Hitter"), "hitter"
+                if original_family == "ball":
+                    return pitcher.get("id"), pitcher.get("fullName", "Unknown Fielder"), "fielder"
+            if status == "confirmed":
+                if original_family == "strike":
+                    return batter.get("id"), batter.get("fullName", "Unknown Hitter"), "hitter"
+                if original_family == "ball":
+                    return pitcher.get("id"), pitcher.get("fullName", "Unknown Fielder"), "fielder"
+
         if final_call == "ball":
             if overturned:
                 return batter.get("id"), batter.get("fullName", "Unknown Hitter"), "hitter"
@@ -481,11 +537,20 @@ class ABSService:
 
     def _infer_final_call(self, play: Dict[str, Any]) -> Optional[str]:
         text = self._collect_play_text(play).lower()
+        abs_phrase = self._extract_abs_call_phrase(play)
 
         if "called strike" in text or "to strike" in text or "as strike" in text:
             return "strike"
         if "called ball" in text or "to ball" in text or "as ball" in text:
             return "ball"
+
+        if abs_phrase:
+            original_family = abs_phrase.get("family")
+            status = abs_phrase.get("status")
+            if original_family in {"ball", "strike"} and status in {"overturned", "confirmed"}:
+                if status == "confirmed":
+                    return original_family
+                return "ball" if original_family == "strike" else "strike"
 
         for event in reversed(play.get("playEvents", [])):
             if not isinstance(event, dict):
