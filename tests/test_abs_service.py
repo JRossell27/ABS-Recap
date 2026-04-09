@@ -79,6 +79,13 @@ def test_detects_generic_abs_result_wording():
     assert svc._infer_review_outcome(play) == (True, False)
 
 
+def test_detects_abs_result_wording_when_call_stands():
+    svc = ABSService()
+    play = _play("ABS challenge complete, call stands", include_pitch=False)
+    assert svc._is_abs_pitch_challenge(play) is True
+    assert svc._infer_review_outcome(play) == (False, True)
+
+
 def test_excludes_generic_non_pitch_reviews():
     svc = ABSService()
     play = _play("Safe/out challenge at first base", include_pitch=False)
@@ -149,6 +156,10 @@ def test_role_inference_from_public_abs_phrase():
     strike_confirmed = _play("Strike 3 call confirmed after ABS challenge", include_pitch=False)
     _, _, strike_confirmed_role = svc._infer_challenger(strike_confirmed)
     assert strike_confirmed_role == "hitter"
+
+    strike_stands = _play("Strike 2 call stands after ABS challenge", include_pitch=False)
+    _, _, strike_stands_role = svc._infer_challenger(strike_stands)
+    assert strike_stands_role == "hitter"
 
 
 def test_parse_game_events_skips_challenges_without_outcome():
