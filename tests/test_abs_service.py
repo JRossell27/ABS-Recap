@@ -172,6 +172,56 @@ def test_parse_game_events_skips_challenges_without_outcome():
     assert events == []
 
 
+def test_parse_game_events_emits_single_abs_event_for_play_level_review():
+    svc = ABSService()
+    play = {
+        "about": {"inning": 5, "halfInning": "Top", "atBatIndex": 33, "isTopInning": True},
+        "matchup": {
+            "batter": {"id": 1, "fullName": "Batter One"},
+            "pitcher": {"id": 2, "fullName": "Pitcher Two"},
+        },
+        "result": {"description": "ABS challenge complete, call stands"},
+        "reviewDetails": {"reviewType": "MJ", "inProgress": False, "isOverturned": False},
+        "playEvents": [
+            {"isPitch": True, "playId": "p1", "details": {"call": {"code": "B"}, "description": "Ball"}},
+            {"isPitch": True, "playId": "p2", "details": {"call": {"code": "C"}, "description": "Called Strike"}},
+            {"isPitch": False, "playId": "rv1", "details": {"eventType": "pitch_challenge", "description": "Pitch Challenge"}},
+        ],
+    }
+    feed = {
+        "liveData": {"plays": {"allPlays": [play]}},
+        "gameData": {"teams": {"away": {"abbreviation": "A"}, "home": {"abbreviation": "H"}}},
+    }
+
+    events = svc._parse_game_events(feed, game_pk=123)
+    assert len(events) == 1
+
+
+def test_parse_game_events_deduplicates_same_reviewed_pitch():
+    svc = ABSService()
+    play = {
+        "about": {"inning": 5, "halfInning": "Top", "atBatIndex": 33, "isTopInning": True},
+        "matchup": {
+            "batter": {"id": 1, "fullName": "Batter One"},
+            "pitcher": {"id": 2, "fullName": "Pitcher Two"},
+        },
+        "result": {"description": "ABS challenge complete, call overturned"},
+        "reviewDetails": {"reviewType": "MJ", "inProgress": False, "isOverturned": True},
+        "playEvents": [
+            {"isPitch": True, "playId": "same-pitch", "details": {"call": {"code": "C"}}},
+            {"isPitch": False, "playId": "challenge-a", "details": {"eventType": "pitch_challenge", "description": "Pitch Challenge"}},
+            {"isPitch": False, "playId": "challenge-b", "details": {"eventType": "pitch_challenge", "description": "Pitch Challenge"}},
+        ],
+    }
+    feed = {
+        "liveData": {"plays": {"allPlays": [play, play]}},
+        "gameData": {"teams": {"away": {"abbreviation": "A"}, "home": {"abbreviation": "H"}}},
+    }
+
+    events = svc._parse_game_events(feed, game_pk=123)
+    assert len(events) == 1
+
+
 def test_missing_outcome_returns_unknown():
     svc = ABSService()
     play = _play("Challenge", include_pitch=True)

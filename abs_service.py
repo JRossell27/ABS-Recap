@@ -11,19 +11,15 @@ from zoneinfo import ZoneInfo
 MLB_BASE_URL = "https://statsapi.mlb.com/api/v1"
 MLB_FEED_URL = "https://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live"
 
-ABS_CONTEXT_KEYWORDS = {
-    "abs",
-    "automatic balls and strikes",
-    "automatic ball strike",
-    "automatic ball-strike",
-    "ball-strike challenge",
-    "ball/strike",
-    "strike zone",
+CHALLENGE_EVENT_KEYWORDS = {
     "pitch challenge",
+    "abs challenge",
+    "manager challenge",
+    "challenge",
+    "replay review",
+    "video review",
 }
-CHALLENGE_KEYWORDS = {"challenge", "challenged"}
 REVIEW_PRESENCE_KEYS = {"review", "reviews", "reviewDetails", "challenge", "challenged"}
-PITCH_CALL_KEYWORDS = {"called strike", "called ball", "to strike", "to ball", "strike", "ball", "zone"}
 ABS_REVIEW_TYPE_CODES = {"mj"}
 EXCLUDED_KEYWORDS = {"hit by pitch", "hbp"}
 OVERTURNED_KEYWORDS = {"overturned", "reversed", "changed", "flipped"}
@@ -39,6 +35,8 @@ ABS_CHALLENGE_RESULT_RE = re.compile(
     r"\bABS\s+challenge\b.*\bcall\s+(?P<status>overturned|confirmed|upheld|stands|call stands)\b",
     re.IGNORECASE,
 )
+PLAY_CALL_BALL_CODES = {"B"}
+PLAY_CALL_STRIKE_CODES = {"C", "S"}
 
 
 @dataclass
@@ -258,20 +256,34 @@ class ABSService:
         game_label = f"{away}–{home}"
 
         output: List[ChallengeEvent] = []
+        seen_challenges: set[str] = set()
+        away_id = teams.get("away", {}).get("id")
+        home_id = teams.get("home", {}).get("id")
         for play in plays:
-            if not self._is_abs_pitch_challenge(play):
+            play["_teams_context"] = {"away_id": away_id, "home_id": home_id}
+            challenge_context = self._extract_abs_challenge_context(play)
+            if challenge_context is None:
                 continue
 
-            description = self._challenge_description(play)
-            overturned, confirmed = self._infer_review_outcome(play)
-            if overturned is None:
+            challenge_uid = challenge_context["uid"]
+            if challenge_uid in seen_challenges:
                 continue
+            seen_challenges.add(challenge_uid)
+
+            overturned = challenge_context["overturned"]
+            confirmed = not overturned
+            description = challenge_context["description"]
+            subject_pitch = challenge_context["pitch_event"]
 
             inning = play.get("about", {}).get("inning")
             half = play.get("about", {}).get("halfInning", "").capitalize()
             inning_label = f"{half} {inning}" if inning else half
 
-            challenger_id, challenger_name, role = self._infer_challenger(play)
+            challenger_id, challenger_name, role = self._infer_challenger(
+                play=play,
+                subject_pitch_event=subject_pitch,
+                challenge_team_id=challenge_context.get("challenge_team_id"),
+            )
 
             output.append(
                 ChallengeEvent(
@@ -291,33 +303,57 @@ class ABSService:
         return output
 
     def _is_abs_pitch_challenge(self, play: Dict[str, Any]) -> bool:
+        return self._extract_abs_challenge_context(play) is not None
+
+    def _extract_abs_challenge_context(self, play: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Build a canonical ABS challenge from one at-bat play.
+        Returns None when the play is not a resolved ABS challenge.
+        """
         text = self._collect_play_text(play).lower()
         if any(k in text for k in EXCLUDED_KEYWORDS):
-            return False
+            return None
 
-        if self._extract_abs_call_phrase(play) or self._extract_abs_result_phrase(play):
-            return True
+        play_events = play.get("playEvents", [])
+        play_review = play.get("reviewDetails")
+        if play_review is None:
+            play_review = play.get("review")
+        play_review = play_review if isinstance(play_review, dict) else {}
+        event_idx = self._find_challenge_event_index(play, play_events, play_review)
+        event = play_events[event_idx] if event_idx is not None and event_idx < len(play_events) else None
 
-        reviews = self._review_nodes(play)
-        if not reviews:
-            return False
+        review = self._merged_review_details(play, event)
+        review_type = str(review.get("reviewType", "")).strip().lower()
+        if review_type and any(t in review_type for t in NON_ABS_REVIEW_TYPES):
+            return None
 
-        has_completed_mj_review = False
-        for review in reviews:
-            review_type = str(review.get("reviewType", "")).strip().lower()
-            if any(t in review_type for t in NON_ABS_REVIEW_TYPES):
-                continue
-            if review_type not in ABS_REVIEW_TYPE_CODES:
-                continue
+        if review_type not in ABS_REVIEW_TYPE_CODES:
+            if not (self._extract_abs_call_phrase(play) or self._extract_abs_result_phrase(play)):
+                return None
 
-            in_progress = review.get("inProgress")
-            if in_progress is True:
-                continue
+        if review.get("inProgress") is True:
+            return None
 
-            has_completed_mj_review = True
-            break
+        overturned, _confirmed = self._infer_review_outcome_with_context(play, review)
+        if overturned is None:
+            return None
 
-        return has_completed_mj_review
+        pitch_event = self._find_challenged_pitch_event(play_events, event_idx)
+        uid_parts = [
+            str(play.get("about", {}).get("atBatIndex", "")),
+            str((pitch_event or {}).get("playId") or (event or {}).get("playId") or event_idx or ""),
+            "abs",
+        ]
+        uid = "_".join(uid_parts)
+
+        description = self._challenge_description(play, event)
+        return {
+            "uid": uid,
+            "overturned": overturned,
+            "description": description,
+            "pitch_event": pitch_event,
+            "challenge_team_id": review.get("challengeTeamId"),
+        }
 
     def _extract_abs_call_phrase(self, play: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         text = self._collect_play_text(play)
@@ -373,7 +409,17 @@ class ABSService:
         chunks.extend(self._recursive_strings(play))
         return " | ".join(chunks)
 
-    def _challenge_description(self, play: Dict[str, Any]) -> str:
+    def _challenge_description(self, play: Dict[str, Any], event: Optional[Dict[str, Any]] = None) -> str:
+        if isinstance(event, dict):
+            details = event.get("details", {})
+            if isinstance(details, dict):
+                event_description = details.get("description")
+                if isinstance(event_description, str) and event_description.strip():
+                    return event_description.strip()
+            direct_description = event.get("description")
+            if isinstance(direct_description, str) and direct_description.strip():
+                return direct_description.strip()
+
         result_description = play.get("result", {}).get("description")
         if isinstance(result_description, str) and result_description.strip():
             return result_description.strip()
@@ -442,6 +488,11 @@ class ABSService:
         return True
 
     def _infer_review_outcome(self, play: Dict[str, Any]) -> Tuple[Optional[bool], Optional[bool]]:
+        return self._infer_review_outcome_with_context(play, {})
+
+    def _infer_review_outcome_with_context(
+        self, play: Dict[str, Any], merged_review: Dict[str, Any]
+    ) -> Tuple[Optional[bool], Optional[bool]]:
         text = self._collect_play_text(play).lower()
         abs_result_status = self._extract_abs_result_phrase(play)
         if abs_result_status == "overturned":
@@ -453,6 +504,20 @@ class ABSService:
             return True, False
         if any(k in text for k in CONFIRMED_KEYWORDS):
             return False, True
+
+        for key in ("isOverturned", "overturned"):
+            value = merged_review.get(key)
+            if isinstance(value, bool):
+                return value, not value
+
+        for key in ("decision", "result", "reviewResult", "description"):
+            value = merged_review.get(key)
+            if isinstance(value, str):
+                normalized = value.lower()
+                if any(k in normalized for k in OVERTURNED_KEYWORDS):
+                    return True, False
+                if any(k in normalized for k in CONFIRMED_KEYWORDS):
+                    return False, True
 
         for review in self._review_nodes(play):
             for key in ("isOverturned", "overturned"):
@@ -493,10 +558,42 @@ class ABSService:
 
         return nodes
 
-    def _infer_challenger(self, play: Dict[str, Any]) -> Tuple[Optional[int], str, Optional[str]]:
+    def _infer_challenger(
+        self,
+        play: Dict[str, Any],
+        subject_pitch_event: Optional[Dict[str, Any]] = None,
+        challenge_team_id: Optional[Any] = None,
+    ) -> Tuple[Optional[int], str, Optional[str]]:
         text = self._collect_play_text(play).lower()
         batter = play.get("matchup", {}).get("batter", {})
         pitcher = play.get("matchup", {}).get("pitcher", {})
+        is_top = play.get("about", {}).get("isTopInning", True)
+        teams = play.get("_teams_context", {})
+        away_id = teams.get("away_id")
+        home_id = teams.get("home_id")
+        batting_side = "away" if is_top else "home"
+        fielding_side = "home" if is_top else "away"
+
+        if challenge_team_id is not None and away_id is not None and home_id is not None:
+            if str(challenge_team_id) == str(away_id):
+                return (
+                    batter.get("id"),
+                    batter.get("fullName", "Unknown Hitter"),
+                    "hitter" if batting_side == "away" else "fielder",
+                )
+            if str(challenge_team_id) == str(home_id):
+                return (
+                    batter.get("id"),
+                    batter.get("fullName", "Unknown Hitter"),
+                    "hitter" if batting_side == "home" else "fielder",
+                )
+
+        pitch_code = self._pitch_call_code(subject_pitch_event)
+        if pitch_code in PLAY_CALL_STRIKE_CODES:
+            return batter.get("id"), batter.get("fullName", "Unknown Hitter"), "hitter"
+        if pitch_code in PLAY_CALL_BALL_CODES:
+            return pitcher.get("id"), pitcher.get("fullName", "Unknown Fielder"), "fielder"
+
         overturned = any(k in text for k in OVERTURNED_KEYWORDS)
         abs_phrase = self._extract_abs_call_phrase(play)
         final_call = self._infer_final_call(play)
@@ -540,6 +637,114 @@ class ABSService:
             return batter.get("id"), batter.get("fullName", "Unknown Hitter"), "hitter"
 
         return None, "Unknown Challenger", None
+
+    def _find_challenge_event_index(
+        self,
+        play: Dict[str, Any],
+        play_events: List[Dict[str, Any]],
+        play_review: Dict[str, Any],
+    ) -> Optional[int]:
+        if not play_events:
+            return None
+
+        if play_review:
+            for idx, event in enumerate(play_events):
+                event_review = self._review_dict(event.get("reviewDetails")) or {}
+                event_review_type = str(event_review.get("reviewType", "")).lower()
+                if event_review_type in ABS_REVIEW_TYPE_CODES:
+                    return idx
+
+            for idx, event in enumerate(play_events):
+                if event.get("isPitch"):
+                    continue
+                details = event.get("details", {})
+                if self._has_challenge_keyword(
+                    details.get("event", ""),
+                    details.get("eventType", ""),
+                    details.get("description", ""),
+                    event.get("description", ""),
+                ):
+                    return idx
+
+            for idx, event in enumerate(play_events):
+                details = event.get("details", {})
+                if isinstance(details, dict) and details.get("hasReview"):
+                    return idx
+
+            return len(play_events) - 1
+
+        for idx, event in enumerate(play_events):
+            details = event.get("details", {})
+            if self._has_challenge_keyword(
+                details.get("event", ""),
+                details.get("eventType", ""),
+                details.get("description", ""),
+                event.get("description", ""),
+            ):
+                return idx
+
+            review = self._merged_review_details(play, event)
+            if review.get("reviewType") or review.get("inProgress") is not None:
+                return idx
+
+        return None
+
+    def _find_challenged_pitch_event(
+        self, play_events: List[Dict[str, Any]], challenge_event_idx: Optional[int]
+    ) -> Optional[Dict[str, Any]]:
+        if challenge_event_idx is None or not play_events:
+            return None
+
+        event = play_events[challenge_event_idx]
+        if event.get("isPitch"):
+            return event
+
+        for idx in range(challenge_event_idx - 1, -1, -1):
+            candidate = play_events[idx]
+            if candidate.get("isPitch"):
+                return candidate
+
+        return None
+
+    def _merged_review_details(
+        self, play: Dict[str, Any], play_event: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        play_review = self._review_dict(play.get("reviewDetails")) or self._review_dict(play.get("review")) or {}
+        event_review = {}
+        if isinstance(play_event, dict):
+            details = play_event.get("details", {})
+            if isinstance(details, dict):
+                event_review = self._review_dict(details.get("reviewDetails")) or {}
+            if not event_review:
+                event_review = self._review_dict(play_event.get("reviewDetails")) or {}
+        merged = dict(play_review)
+        for key, value in event_review.items():
+            if value is not None:
+                merged[key] = value
+        return merged
+
+    def _review_dict(self, value: Any) -> Optional[Dict[str, Any]]:
+        return value if isinstance(value, dict) else None
+
+    def _has_challenge_keyword(self, *parts: Any) -> bool:
+        text = " ".join(str(p or "") for p in parts).lower()
+        return any(keyword in text for keyword in CHALLENGE_EVENT_KEYWORDS)
+
+    def _pitch_call_code(self, pitch_event: Optional[Dict[str, Any]]) -> Optional[str]:
+        if not isinstance(pitch_event, dict):
+            return None
+        details = pitch_event.get("details", {})
+        if not isinstance(details, dict):
+            return None
+        call = details.get("call", {})
+        if isinstance(call, dict):
+            code = call.get("code")
+            if isinstance(code, str) and code.strip():
+                return code.strip().upper()
+        code = details.get("code")
+        if isinstance(code, str) and code.strip():
+            return code.strip().upper()
+        return None
 
     def _infer_final_call(self, play: Dict[str, Any]) -> Optional[str]:
         text = self._collect_play_text(play).lower()
