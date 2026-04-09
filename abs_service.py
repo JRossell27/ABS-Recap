@@ -35,6 +35,10 @@ ABS_CHALLENGE_WORDING_RE = re.compile(
     r"(?P<status>overturned|confirmed)\s+after\s+ABS\s+challenge\b",
     re.IGNORECASE,
 )
+ABS_CHALLENGE_RESULT_RE = re.compile(
+    r"\bABS\s+challenge\b.*\bcall\s+(?P<status>overturned|confirmed)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -291,6 +295,7 @@ class ABSService:
         if any(k in text for k in EXCLUDED_KEYWORDS):
             return False
 
+        if self._extract_abs_call_phrase(play) or self._extract_abs_result_phrase(play):
         if self._extract_abs_call_phrase(play):
             return True
 
@@ -329,6 +334,13 @@ class ABSService:
             number = None
 
         return {"family": family, "number": number, "status": status}
+
+    def _extract_abs_result_phrase(self, play: Dict[str, Any]) -> Optional[str]:
+        text = self._collect_play_text(play)
+        match = ABS_CHALLENGE_RESULT_RE.search(text)
+        if not match:
+            return None
+        return match.group("status").strip().lower()
 
     def _collect_play_text(self, play: Dict[str, Any]) -> str:
         chunks: List[str] = []
@@ -426,6 +438,12 @@ class ABSService:
 
     def _infer_review_outcome(self, play: Dict[str, Any]) -> Tuple[Optional[bool], Optional[bool]]:
         text = self._collect_play_text(play).lower()
+        abs_result_status = self._extract_abs_result_phrase(play)
+        if abs_result_status == "overturned":
+            return True, False
+        if abs_result_status == "confirmed":
+            return False, True
+
         if any(k in text for k in OVERTURNED_KEYWORDS):
             return True, False
         if any(k in text for k in CONFIRMED_KEYWORDS):

@@ -72,6 +72,13 @@ def test_detects_public_abs_wording_without_review_nodes():
     assert svc._is_abs_pitch_challenge(play) is True
 
 
+def test_detects_generic_abs_result_wording():
+    svc = ABSService()
+    play = _play("ABS Challenge - Successful, call overturned", include_pitch=False)
+    assert svc._is_abs_pitch_challenge(play) is True
+    assert svc._infer_review_outcome(play) == (True, False)
+
+
 def test_excludes_generic_non_pitch_reviews():
     svc = ABSService()
     play = _play("Safe/out challenge at first base", include_pitch=False)
