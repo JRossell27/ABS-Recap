@@ -64,20 +64,9 @@ class ABSService:
         games = self._fetch_schedule_for_date(target_date)
         events, failed_games = self._collect_events_from_games(games, target_date=target_date)
 
-        overturned = sum(1 for event in events if event.overturned)
-        confirmed = sum(1 for event in events if event.confirmed)
-        total = len(events)
-        hitter_total = sum(1 for event in events if event.role == "hitter")
-        fielder_total = sum(1 for event in events if event.role == "fielder")
-
         return {
             "date": target_date,
-            "total": total,
-            "hitter_total": hitter_total,
-            "fielder_total": fielder_total,
-            "overturned": overturned,
-            "confirmed": confirmed,
-            "success_rate": (overturned / total * 100.0) if total else 0.0,
+            "total": len(events),
             "failed_games": failed_games,
             "games_scanned": len(games),
         }
@@ -118,19 +107,8 @@ class ABSService:
         lines = [
             "ABS Daily Recap ⚾️",
             recap["date"].strftime("%B %-d, %Y"),
-            "",
-            f"{recap['total']} Challenges",
-            f"Hitters: {recap.get('hitter_total', 0)} | Fielders: {recap.get('fielder_total', 0)}",
-            "",
-            f"Overturned: {recap['overturned']}",
-            f"Confirmed: {recap['confirmed']}",
-            f"Success Rate: {recap['success_rate']:.1f}%",
+            f"Total Challenges: {recap['total']}",
         ]
-
-        failed_games = recap.get("failed_games", 0)
-        games_scanned = recap.get("games_scanned", 0)
-        if failed_games:
-            lines.append(f"⚠️ Data fetch issues: {failed_games}/{games_scanned} games unavailable")
 
         return "\n".join(lines)
 
@@ -211,12 +189,12 @@ class ABSService:
             game_pk = game.get("gamePk")
             if not game_pk:
                 continue
-            game_start_date_eastern = self._game_start_date_eastern(game)
-            if target_date and game_start_date_eastern != target_date:
+            game_date = self._game_official_date(game)
+            if target_date and game_date != target_date:
                 continue
-            if start_date and game_start_date_eastern and game_start_date_eastern < start_date:
+            if start_date and game_date and game_date < start_date:
                 continue
-            if end_date and game_start_date_eastern and game_start_date_eastern > end_date:
+            if end_date and game_date and game_date > end_date:
                 continue
             try:
                 feed = self._fetch_game_feed(game_pk)
@@ -247,6 +225,21 @@ class ABSService:
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed.astimezone(EASTERN).date()
+
+    def _game_official_date(self, game: Dict[str, Any]) -> Optional[date]:
+        """
+        Prefer MLB's official game date (schedule day) to align with Baseball Savant daily splits.
+        Fall back to ET-converted game start date when officialDate is unavailable.
+        """
+        official_date = game.get("officialDate")
+        if isinstance(official_date, str):
+            text = official_date.strip()
+            if text:
+                try:
+                    return date.fromisoformat(text)
+                except ValueError:
+                    pass
+        return self._game_start_date_eastern(game)
 
     def _parse_game_events(self, feed: Dict[str, Any], game_pk: int) -> List[ChallengeEvent]:
         plays = feed.get("liveData", {}).get("plays", {}).get("allPlays", [])
