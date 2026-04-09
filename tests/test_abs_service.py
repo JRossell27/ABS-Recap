@@ -328,6 +328,7 @@ def test_game_official_date_falls_back_to_eastern_start_date():
 
 
 def test_daily_message_outputs_only_date_and_total():
+def test_daily_message_has_role_breakout_and_no_key_moments():
     svc = ABSService()
     message = svc.format_daily_discord_message(
         {
