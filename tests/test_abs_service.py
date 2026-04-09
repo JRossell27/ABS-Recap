@@ -327,25 +327,21 @@ def test_game_official_date_falls_back_to_eastern_start_date():
     assert svc._game_official_date(game) == __import__("datetime").date(2026, 4, 6)
 
 
+def test_daily_message_outputs_only_date_and_total():
 def test_daily_message_has_role_breakout_and_no_key_moments():
     svc = ABSService()
     message = svc.format_daily_discord_message(
         {
             "date": __import__("datetime").date(2026, 4, 5),
             "total": 72,
-            "hitter_total": 31,
-            "fielder_total": 41,
-            "overturned": 20,
-            "confirmed": 52,
-            "success_rate": 27.8,
         }
     )
 
     assert "ABS Daily Recap ⚾️" in message
     assert "April 5, 2026" in message
-    assert "72 Challenges" in message
-    assert "Hitters: 31 | Fielders: 41" in message
-    assert "Biggest Moments" not in message
+    assert "Total Challenges: 72" in message
+    assert "Hitters:" not in message
+    assert "Overturned:" not in message
 
 
 def test_season_message_shows_totals_even_without_leader_rows():
