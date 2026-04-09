@@ -271,20 +271,20 @@ def test_build_player_rows_keeps_roles_separate():
     assert fielders[0]["total"] == 1
 
 
-def test_daily_recap_only_uses_games_starting_on_target_eastern_date():
+def test_daily_recap_prefers_official_date_when_filtering_target_day():
     svc = ABSService()
     captured = {}
 
     games = [
-        {"gamePk": 1, "gameDate": "2026-04-06T23:10:00Z"},  # Apr 6 ET
-        {"gamePk": 2, "gameDate": "2026-04-07T01:10:00Z"},  # Apr 6 ET
-        {"gamePk": 3, "gameDate": "2026-04-07T05:10:00Z"},  # Apr 7 ET (exclude)
+        {"gamePk": 1, "officialDate": "2026-04-06", "gameDate": "2026-04-06T23:10:00Z"},
+        {"gamePk": 2, "officialDate": "2026-04-06", "gameDate": "2026-04-07T05:10:00Z"},  # Apr 7 ET, still Apr 6 official
+        {"gamePk": 3, "officialDate": "2026-04-07", "gameDate": "2026-04-07T03:10:00Z"},  # exclude
     ]
 
     svc._fetch_schedule_for_date = lambda _target: games
 
     def fake_collect(found_games, **kwargs):
-        captured["games"] = [g["gamePk"] for g in found_games if svc._game_start_date_eastern(g) == kwargs.get("target_date")]
+        captured["games"] = [g["gamePk"] for g in found_games if svc._game_official_date(g) == kwargs.get("target_date")]
         captured["target"] = kwargs.get("target_date")
         return [], 0
 
@@ -295,15 +295,15 @@ def test_daily_recap_only_uses_games_starting_on_target_eastern_date():
     assert captured["games"] == [1, 2]
 
 
-def test_collect_events_filters_to_season_date_window_by_eastern_start():
+def test_collect_events_filters_to_season_date_window_by_official_date():
     svc = ABSService()
     scanned = []
 
     games = [
-        {"gamePk": 10, "gameDate": "2026-03-25T17:05:00Z"},
-        {"gamePk": 11, "gameDate": "2026-03-24T23:55:00Z"},  # outside start window
-        {"gamePk": 12, "gameDate": "2026-04-07T03:59:00Z"},  # Apr 6 ET
-        {"gamePk": 13, "gameDate": "2026-04-07T04:01:00Z"},  # Apr 7 ET outside end window
+        {"gamePk": 10, "officialDate": "2026-03-25", "gameDate": "2026-03-25T17:05:00Z"},
+        {"gamePk": 11, "officialDate": "2026-03-24", "gameDate": "2026-03-25T03:55:00Z"},  # outside start window
+        {"gamePk": 12, "officialDate": "2026-04-06", "gameDate": "2026-04-07T03:59:00Z"},
+        {"gamePk": 13, "officialDate": "2026-04-07", "gameDate": "2026-04-07T01:01:00Z"},  # outside end window
     ]
 
     svc._fetch_game_feed = lambda game_pk: scanned.append(game_pk) or {
@@ -319,6 +319,12 @@ def test_collect_events_filters_to_season_date_window_by_eastern_start():
     )
 
     assert scanned == [10, 12]
+
+
+def test_game_official_date_falls_back_to_eastern_start_date():
+    svc = ABSService()
+    game = {"gameDate": "2026-04-07T01:10:00Z"}
+    assert svc._game_official_date(game) == __import__("datetime").date(2026, 4, 6)
 
 
 def test_daily_message_has_role_breakout_and_no_key_moments():
