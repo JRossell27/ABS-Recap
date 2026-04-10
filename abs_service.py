@@ -261,46 +261,136 @@ class ABSService:
         home_id = teams.get("home", {}).get("id")
         for play in plays:
             play["_teams_context"] = {"away_id": away_id, "home_id": home_id}
-            challenge_context = self._extract_abs_challenge_context(play)
-            if challenge_context is None:
-                continue
+            for challenge_context in self._extract_all_abs_challenge_contexts(play):
+                challenge_uid = challenge_context["uid"]
+                if challenge_uid in seen_challenges:
+                    continue
+                seen_challenges.add(challenge_uid)
 
-            challenge_uid = challenge_context["uid"]
-            if challenge_uid in seen_challenges:
-                continue
-            seen_challenges.add(challenge_uid)
+                overturned = challenge_context["overturned"]
+                confirmed = not overturned
+                description = challenge_context["description"]
+                subject_pitch = challenge_context["pitch_event"]
 
-            overturned = challenge_context["overturned"]
-            confirmed = not overturned
-            description = challenge_context["description"]
-            subject_pitch = challenge_context["pitch_event"]
+                inning = play.get("about", {}).get("inning")
+                half = play.get("about", {}).get("halfInning", "").capitalize()
+                inning_label = f"{half} {inning}" if inning else half
 
-            inning = play.get("about", {}).get("inning")
-            half = play.get("about", {}).get("halfInning", "").capitalize()
-            inning_label = f"{half} {inning}" if inning else half
-
-            challenger_id, challenger_name, role = self._infer_challenger(
-                play=play,
-                subject_pitch_event=subject_pitch,
-                challenge_team_id=challenge_context.get("challenge_team_id"),
-            )
-
-            output.append(
-                ChallengeEvent(
-                    game_pk=game_pk,
-                    game_label=game_label,
-                    inning_label=inning_label,
-                    description=description,
-                    overturned=overturned,
-                    confirmed=confirmed,
-                    win_probability_delta=self._win_probability_delta(play),
-                    challenger_id=challenger_id,
-                    challenger_name=challenger_name,
-                    role=role,
+                challenger_id, challenger_name, role = self._infer_challenger(
+                    play=play,
+                    subject_pitch_event=subject_pitch,
+                    challenge_team_id=challenge_context.get("challenge_team_id"),
                 )
-            )
+
+                output.append(
+                    ChallengeEvent(
+                        game_pk=game_pk,
+                        game_label=game_label,
+                        inning_label=inning_label,
+                        description=description,
+                        overturned=overturned,
+                        confirmed=confirmed,
+                        win_probability_delta=self._win_probability_delta(play),
+                        challenger_id=challenger_id,
+                        challenger_name=challenger_name,
+                        role=role,
+                    )
+                )
 
         return output
+
+    def _extract_all_abs_challenge_contexts(self, play: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Extract all ABS challenge contexts from a single at-bat play.
+
+        An at-bat can have multiple challenged pitches (e.g., a batter challenges
+        pitch 2, then the catcher challenges pitch 5 in the same at-bat). The
+        original _extract_abs_challenge_context only finds the first challenge event,
+        causing subsequent challenges in the same at-bat to be silently dropped.
+
+        When multiple play events are each explicitly tagged with reviewType='mj',
+        each is treated as an independent challenge and a context is built for it.
+        Otherwise this falls back to the existing single-challenge logic so behaviour
+        is unchanged for the common case.
+        """
+        text = self._collect_play_text(play).lower()
+        if any(k in text for k in EXCLUDED_KEYWORDS):
+            return []
+
+        play_events = play.get("playEvents", [])
+
+        # Find every event that carries its own ABS review tag.
+        mj_indices = [
+            idx for idx, event in enumerate(play_events)
+            if str(
+                (self._review_dict(event.get("reviewDetails")) or {}).get("reviewType", "")
+            ).strip().lower() in ABS_REVIEW_TYPE_CODES
+        ]
+
+        if len(mj_indices) > 1:
+            # Multiple distinct ABS challenges within this at-bat.
+            contexts = []
+            for event_idx in mj_indices:
+                ctx = self._build_abs_context_for_event(play, play_events, event_idx)
+                if ctx is not None:
+                    contexts.append(ctx)
+            return contexts
+
+        # Single tagged event (or none) — use the existing play-level logic so
+        # all existing detection paths (text-based, play-level reviewDetails, etc.)
+        # continue to work exactly as before.
+        single = self._extract_abs_challenge_context(play)
+        return [single] if single is not None else []
+
+    def _build_abs_context_for_event(
+        self,
+        play: Dict[str, Any],
+        play_events: List[Dict[str, Any]],
+        event_idx: int,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Build a challenge context dict for a specific ABS challenge event index.
+        Used by _extract_all_abs_challenge_contexts for multi-challenge at-bats.
+        """
+        event = play_events[event_idx] if event_idx < len(play_events) else None
+        event_review = self._review_dict((event or {}).get("reviewDetails")) or {}
+
+        review_type = str(event_review.get("reviewType", "")).strip().lower()
+        if review_type and any(t in review_type for t in NON_ABS_REVIEW_TYPES):
+            return None
+        if review_type not in ABS_REVIEW_TYPE_CODES:
+            return None
+        if event_review.get("inProgress") is True:
+            return None
+
+        # Prefer the explicit boolean stored on the event-level review; fall back
+        # to play-level text inference only if the boolean is absent.
+        overturned: Optional[bool] = None
+        for key in ("isOverturned", "overturned"):
+            value = event_review.get(key)
+            if isinstance(value, bool):
+                overturned = value
+                break
+
+        if overturned is None:
+            overturned, _ = self._infer_review_outcome_with_context(play, event_review)
+
+        if overturned is None:
+            return None
+
+        pitch_event = self._find_challenged_pitch_event(play_events, event_idx)
+        uid_parts = [
+            str(play.get("about", {}).get("atBatIndex", "")),
+            str((pitch_event or {}).get("playId") or (event or {}).get("playId") or event_idx or ""),
+            "abs",
+        ]
+        return {
+            "uid": "_".join(uid_parts),
+            "overturned": overturned,
+            "description": self._challenge_description(play, event),
+            "pitch_event": pitch_event,
+            "challenge_team_id": event_review.get("challengeTeamId"),
+        }
 
     def _is_abs_pitch_challenge(self, play: Dict[str, Any]) -> bool:
         return self._extract_abs_challenge_context(play) is not None
