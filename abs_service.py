@@ -62,7 +62,11 @@ class ABSService:
         target_date = today - timedelta(days=1)
 
         games = self._fetch_schedule_for_date(target_date)
-        events, failed_games = self._collect_events_from_games(games, target_date=target_date)
+        events, failed_games = self._collect_events_from_games(
+            games,
+            target_date=target_date,
+            target_uses_start_date=True,
+        )
 
         return {
             "date": target_date,
@@ -179,6 +183,7 @@ class ABSService:
         self,
         games: Iterable[Dict[str, Any]],
         target_date: Optional[date] = None,
+        target_uses_start_date: bool = False,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
     ) -> Tuple[List[ChallengeEvent], int]:
@@ -189,7 +194,9 @@ class ABSService:
             game_pk = game.get("gamePk")
             if not game_pk:
                 continue
-            game_date = self._game_official_date(game)
+            game_date = (
+                self._game_start_date_eastern(game) if target_uses_start_date else self._game_official_date(game)
+            )
             if target_date and game_date != target_date:
                 continue
             if start_date and game_date and game_date < start_date:
