@@ -222,6 +222,51 @@ def test_parse_game_events_deduplicates_same_reviewed_pitch():
     assert len(events) == 1
 
 
+def test_parse_game_events_counts_multiple_challenges_in_same_at_bat():
+    """Two different pitches challenged in the same at-bat must both be counted."""
+    svc = ABSService()
+    play = {
+        "about": {"inning": 3, "halfInning": "Bottom", "atBatIndex": 12, "isTopInning": False},
+        "matchup": {
+            "batter": {"id": 10, "fullName": "Hitter A"},
+            "pitcher": {"id": 20, "fullName": "Pitcher B"},
+        },
+        "result": {"description": "At bat complete"},
+        # Play-level reviewDetails reflects only one review; the other is event-level only.
+        "reviewDetails": {"reviewType": "MJ", "inProgress": False, "isOverturned": True},
+        "playEvents": [
+            # pitch 1: called strike, challenged by batter → overturned (ball)
+            {"isPitch": True, "playId": "pitch-1", "details": {"call": {"code": "C"}, "description": "Called Strike"}},
+            {
+                "isPitch": False,
+                "playId": "challenge-1",
+                "details": {"eventType": "pitch_challenge", "description": "Pitch Challenge"},
+                "reviewDetails": {"reviewType": "MJ", "inProgress": False, "isOverturned": True},
+            },
+            # pitch 2: regular pitch after overturned call
+            {"isPitch": True, "playId": "pitch-2", "details": {"call": {"code": "B"}, "description": "Ball"}},
+            # pitch 3: called ball, challenged by fielder → confirmed
+            {"isPitch": True, "playId": "pitch-3", "details": {"call": {"code": "B"}, "description": "Ball"}},
+            {
+                "isPitch": False,
+                "playId": "challenge-2",
+                "details": {"eventType": "pitch_challenge", "description": "Pitch Challenge"},
+                "reviewDetails": {"reviewType": "MJ", "inProgress": False, "isOverturned": False},
+            },
+        ],
+    }
+    feed = {
+        "liveData": {"plays": {"allPlays": [play]}},
+        "gameData": {"teams": {"away": {"abbreviation": "A"}, "home": {"abbreviation": "H"}}},
+    }
+
+    events = svc._parse_game_events(feed, game_pk=999)
+    assert len(events) == 2, f"Expected 2 challenges, got {len(events)}"
+    overturned_flags = {e.overturned for e in events}
+    assert True in overturned_flags, "Expected one overturned challenge"
+    assert False in overturned_flags, "Expected one confirmed challenge"
+
+
 def test_missing_outcome_returns_unknown():
     svc = ABSService()
     play = _play("Challenge", include_pitch=True)
