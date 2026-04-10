@@ -271,28 +271,34 @@ def test_build_player_rows_keeps_roles_separate():
     assert fielders[0]["total"] == 1
 
 
-def test_daily_recap_prefers_official_date_when_filtering_target_day():
+def test_daily_recap_filters_target_day_by_game_start_date():
     svc = ABSService()
     captured = {}
 
     games = [
-        {"gamePk": 1, "officialDate": "2026-04-06", "gameDate": "2026-04-06T23:10:00Z"},
-        {"gamePk": 2, "officialDate": "2026-04-06", "gameDate": "2026-04-07T05:10:00Z"},  # Apr 7 ET, still Apr 6 official
-        {"gamePk": 3, "officialDate": "2026-04-07", "gameDate": "2026-04-07T03:10:00Z"},  # exclude
+        {"gamePk": 1, "officialDate": "2026-04-06", "gameDate": "2026-04-06T23:10:00Z"},  # Apr 6 ET
+        {"gamePk": 2, "officialDate": "2026-04-06", "gameDate": "2026-04-07T05:10:00Z"},  # Apr 7 ET, exclude
+        {"gamePk": 3, "officialDate": "2026-04-07", "gameDate": "2026-04-07T03:10:00Z"},  # Apr 6 ET, include
     ]
 
     svc._fetch_schedule_for_date = lambda _target: games
 
     def fake_collect(found_games, **kwargs):
-        captured["games"] = [g["gamePk"] for g in found_games if svc._game_official_date(g) == kwargs.get("target_date")]
+        captured["games"] = [
+            g["gamePk"]
+            for g in found_games
+            if svc._game_start_date_eastern(g) == kwargs.get("target_date")
+        ]
         captured["target"] = kwargs.get("target_date")
+        captured["target_uses_start_date"] = kwargs.get("target_uses_start_date")
         return [], 0
 
     svc._collect_events_from_games = fake_collect
     svc.get_daily_recap(run_date=__import__("datetime").date(2026, 4, 7))
 
     assert captured["target"] == __import__("datetime").date(2026, 4, 6)
-    assert captured["games"] == [1, 2]
+    assert captured["target_uses_start_date"] is True
+    assert captured["games"] == [1, 3]
 
 
 def test_collect_events_filters_to_season_date_window_by_official_date():
@@ -327,7 +333,6 @@ def test_game_official_date_falls_back_to_eastern_start_date():
     assert svc._game_official_date(game) == __import__("datetime").date(2026, 4, 6)
 
 
-def test_daily_message_outputs_only_date_and_total():
 def test_daily_message_has_role_breakout_and_no_key_moments():
     svc = ABSService()
     message = svc.format_daily_discord_message(
