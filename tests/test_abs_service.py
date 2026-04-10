@@ -316,34 +316,55 @@ def test_build_player_rows_keeps_roles_separate():
     assert fielders[0]["total"] == 1
 
 
-def test_daily_recap_filters_target_day_by_game_start_date():
+def test_daily_recap_filters_by_official_date_not_et_start():
+    """Daily recap must use officialDate, not ET start time.
+
+    A West Coast game starting at 10:05 PM PT on Apr 6 has:
+      officialDate = "2026-04-06"   (local Pacific date — correct schedule day)
+      gameDate     = "2026-04-07T05:05:00Z"  (UTC, past midnight ET → Apr 7 ET)
+
+    The old code used ET start time, so it wrongly dropped this game from the
+    Apr 6 recap and assigned it to Apr 7.  The fix is target_uses_start_date=False
+    so _game_official_date is used instead.
+    """
     svc = ABSService()
     captured = {}
 
     games = [
-        {"gamePk": 1, "officialDate": "2026-04-06", "gameDate": "2026-04-06T23:10:00Z"},  # Apr 6 ET
-        {"gamePk": 2, "officialDate": "2026-04-06", "gameDate": "2026-04-07T05:10:00Z"},  # Apr 7 ET, exclude
-        {"gamePk": 3, "officialDate": "2026-04-07", "gameDate": "2026-04-07T03:10:00Z"},  # Apr 6 ET, include
+        # Normal evening East Coast game — officialDate and ET start both Apr 6
+        {"gamePk": 1, "officialDate": "2026-04-06", "gameDate": "2026-04-06T23:10:00Z"},
+        # Late West Coast game: officialDate Apr 6 (Pacific), but ET start = Apr 7 01:05
+        # Old code would DROP this; new code must INCLUDE it via officialDate.
+        {"gamePk": 2, "officialDate": "2026-04-06", "gameDate": "2026-04-07T05:05:00Z"},
+        # Game whose officialDate is Apr 7 — must be excluded from Apr 6 recap
+        {"gamePk": 3, "officialDate": "2026-04-07", "gameDate": "2026-04-07T18:05:00Z"},
     ]
 
     svc._fetch_schedule_for_date = lambda _target: games
 
     def fake_collect(found_games, **kwargs):
+        captured["target"] = kwargs.get("target_date")
+        captured["target_uses_start_date"] = kwargs.get("target_uses_start_date")
+        # Simulate what _collect_events_from_games does with officialDate filtering
         captured["games"] = [
             g["gamePk"]
             for g in found_games
-            if svc._game_start_date_eastern(g) == kwargs.get("target_date")
+            if svc._game_official_date(g) == kwargs.get("target_date")
         ]
-        captured["target"] = kwargs.get("target_date")
-        captured["target_uses_start_date"] = kwargs.get("target_uses_start_date")
         return [], 0
 
     svc._collect_events_from_games = fake_collect
     svc.get_daily_recap(run_date=__import__("datetime").date(2026, 4, 7))
 
     assert captured["target"] == __import__("datetime").date(2026, 4, 6)
-    assert captured["target_uses_start_date"] is True
-    assert captured["games"] == [1, 3]
+    assert captured["target_uses_start_date"] is False, (
+        "Daily recap must use officialDate (target_uses_start_date=False) "
+        "so late West Coast games are not dropped"
+    )
+    assert captured["games"] == [1, 2], (
+        "Game 2 (late West Coast start) must be included via officialDate; "
+        "Game 3 (officialDate Apr 7) must be excluded"
+    )
 
 
 def test_collect_events_filters_to_season_date_window_by_official_date():

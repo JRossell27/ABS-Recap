@@ -65,7 +65,7 @@ class ABSService:
         events, failed_games = self._collect_events_from_games(
             games,
             target_date=target_date,
-            target_uses_start_date=True,
+            target_uses_start_date=False,
         )
 
         return {
