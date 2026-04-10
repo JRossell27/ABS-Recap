@@ -57,23 +57,28 @@ class ABSService:
     def __init__(self, session: Optional[requests.Session] = None):
         self.session = session or requests.Session()
 
-    def get_daily_recap(self, run_date: Optional[date] = None) -> Dict[str, Any]:
+    def get_daily_recap(self, run_date: Optional[date] = None, debug: bool = False) -> Dict[str, Any]:
         today = run_date or self._today_eastern()
         target_date = today - timedelta(days=1)
 
         games = self._fetch_schedule_for_date(target_date)
+        per_game_log: List[Dict[str, Any]] = []
         events, failed_games = self._collect_events_from_games(
             games,
             target_date=target_date,
             target_uses_start_date=False,
+            per_game_log=per_game_log if debug else None,
         )
 
-        return {
+        result: Dict[str, Any] = {
             "date": target_date,
             "total": len(events),
             "failed_games": failed_games,
             "games_scanned": len(games),
         }
+        if debug:
+            result["per_game"] = per_game_log
+        return result
 
     def get_season_leaderboard(
         self,
@@ -186,6 +191,7 @@ class ABSService:
         target_uses_start_date: bool = False,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        per_game_log: Optional[List[Dict[str, Any]]] = None,
     ) -> Tuple[List[ChallengeEvent], int]:
         events: List[ChallengeEvent] = []
         failed_games = 0
@@ -198,6 +204,15 @@ class ABSService:
                 self._game_start_date_eastern(game) if target_uses_start_date else self._game_official_date(game)
             )
             if target_date and game_date != target_date:
+                if per_game_log is not None:
+                    per_game_log.append({
+                        "gamePk": game_pk,
+                        "officialDate": game.get("officialDate"),
+                        "gameDate": game.get("gameDate"),
+                        "resolved_date": str(game_date),
+                        "status": "skipped_date_mismatch",
+                        "challenges": 0,
+                    })
                 continue
             if start_date and game_date and game_date < start_date:
                 continue
@@ -207,8 +222,31 @@ class ABSService:
                 feed = self._fetch_game_feed(game_pk)
             except requests.RequestException:
                 failed_games += 1
+                if per_game_log is not None:
+                    per_game_log.append({
+                        "gamePk": game_pk,
+                        "officialDate": game.get("officialDate"),
+                        "gameDate": game.get("gameDate"),
+                        "resolved_date": str(game_date),
+                        "status": "fetch_failed",
+                        "challenges": 0,
+                    })
                 continue
-            events.extend(self._parse_game_events(feed, game_pk))
+            game_events = self._parse_game_events(feed, game_pk)
+            events.extend(game_events)
+            if per_game_log is not None:
+                teams = feed.get("gameData", {}).get("teams", {})
+                away = teams.get("away", {}).get("abbreviation", "AWY")
+                home = teams.get("home", {}).get("abbreviation", "HME")
+                per_game_log.append({
+                    "gamePk": game_pk,
+                    "matchup": f"{away}@{home}",
+                    "officialDate": game.get("officialDate"),
+                    "gameDate": game.get("gameDate"),
+                    "resolved_date": str(game_date),
+                    "status": "ok",
+                    "challenges": len(game_events),
+                })
 
         return events, failed_games
 
@@ -376,7 +414,9 @@ class ABSService:
             overturned, _ = self._infer_review_outcome_with_context(play, event_review)
 
         if overturned is None:
-            return None
+            # reviewType="mj" was already confirmed; the outcome boolean is simply
+            # missing from this event's data.  Count it as confirmed rather than drop.
+            overturned = False
 
         pitch_event = self._find_challenged_pitch_event(play_events, event_idx)
         uid_parts = [
@@ -426,7 +466,14 @@ class ABSService:
 
         overturned, _confirmed = self._infer_review_outcome_with_context(play, review)
         if overturned is None:
-            return None
+            if review_type in ABS_REVIEW_TYPE_CODES:
+                # The reviewType confirms this is a resolved ABS challenge, but the
+                # outcome field is absent from the API response.  Default to confirmed
+                # (overturned=False) so the challenge is counted rather than silently
+                # dropped, which would undercount the day's total.
+                overturned = False
+            else:
+                return None
 
         pitch_event = self._find_challenged_pitch_event(play_events, event_idx)
         uid_parts = [

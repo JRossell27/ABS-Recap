@@ -36,6 +36,19 @@ def healthz():
     return {"status": "ok"}, 200
 
 
+@app.get("/debug/daily")
+def debug_daily():
+    """Return a per-game challenge breakdown for yesterday to help diagnose count mismatches."""
+    recap = service.get_daily_recap(debug=True)
+    return {
+        "date": recap["date"].isoformat(),
+        "total": recap["total"],
+        "failed_games": recap["failed_games"],
+        "games_scanned": recap["games_scanned"],
+        "per_game": recap.get("per_game", []),
+    }, 200
+
+
 @app.post("/send/daily")
 def send_daily():
     try:
