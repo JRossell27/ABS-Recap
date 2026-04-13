@@ -156,7 +156,7 @@ class ABSService:
         date_tokens = self._daily_date_tokens(target_date)
         date_pattern = "|".join(re.escape(token) for token in date_tokens)
         challenge_key_pattern = (
-            r'"?(?:totalChallenges|attemptTotal|totalAttempts|challengesTotal|challengeTotal|challenge_count)"?'
+            r'"?(?:totalChallenges|attemptTotal|totalAttempts|challengesTotal|challengeTotal)"?'
             r"\s*[:=]\s*\"?([\d,]+)\"?"
         )
 
@@ -187,7 +187,7 @@ class ABSService:
                     date_scoped_candidates.append(int(match.group(1).replace(",", "")))
 
         if date_scoped_candidates:
-            return date_scoped_candidates[0]
+            return max(date_scoped_candidates)
 
         raise ValueError(f"Could not find total ABS attempts for selected date {target_date.isoformat()}")
 
