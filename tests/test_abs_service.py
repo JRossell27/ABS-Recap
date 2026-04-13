@@ -179,6 +179,17 @@ def test_parse_daily_attempt_total_uses_requested_date_match():
     assert svc._parse_daily_attempt_total(html, date(2026, 4, 12)) == 59
 
 
+def test_parse_daily_attempt_total_ignores_per_game_challenge_count_rows():
+    svc = ABSService()
+    html = """
+    {
+      "rows": [{"game_date":"2026-04-12","challenge_count":"3"}],
+      "totals": [{"game_date":"2026-04-12","totalChallenges":"59"}]
+    }
+    """
+    assert svc._parse_daily_attempt_total(html, date(2026, 4, 12)) == 59
+
+
 class _FallbackSession:
     def __init__(self):
         self.calls = []
