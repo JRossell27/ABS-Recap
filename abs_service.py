@@ -21,7 +21,7 @@ class ABSService:
         page = self._fetch_daily_page(use_date)
         return {
             "date": use_date,
-            "total": self._parse_attempt_total(page),
+            "total": self._parse_daily_attempt_total(page, use_date),
             "source": "Baseball Savant",
         }
 
@@ -122,11 +122,11 @@ class ABSService:
                 3,
             ),
             (
-                r'"(?:totalChallenges|attemptTotal|totalAttempts|challengesTotal|challengeTotal|challenge_count|total)"\s*:\s*"?([\d,]+)"?',
+                r'"(?:totalChallenges|attemptTotal|totalAttempts|challengesTotal|challengeTotal|challenge_count)"\s*:\s*"?([\d,]+)"?',
                 3,
             ),
             (
-                r"(?:totalChallenges|attemptTotal|totalAttempts|challengesTotal|challengeTotal|challenge_count|total)\s*=\s*\"?([\d,]+)\"?",
+                r"(?:totalChallenges|attemptTotal|totalAttempts|challengesTotal|challengeTotal|challenge_count)\s*=\s*\"?([\d,]+)\"?",
                 3,
             ),
             (
@@ -145,9 +145,60 @@ class ABSService:
                 candidates.append((priority, int(match.group(1).replace(",", ""))))
 
         if candidates:
-            return max(candidates, key=lambda item: (item[0], item[1]))[1]
+            highest_priority = max(priority for priority, _ in candidates)
+            for priority, value in candidates:
+                if priority == highest_priority:
+                    return value
 
         raise ValueError("Could not find total ABS attempts on Baseball Savant page")
+
+    def _parse_daily_attempt_total(self, html: str, target_date: date) -> int:
+        date_tokens = self._daily_date_tokens(target_date)
+        date_pattern = "|".join(re.escape(token) for token in date_tokens)
+        challenge_key_pattern = (
+            r'"?(?:totalChallenges|attemptTotal|totalAttempts|challengesTotal|challengeTotal|challenge_count)"?'
+            r"\s*[:=]\s*\"?([\d,]+)\"?"
+        )
+
+        date_scoped_candidates = []
+
+        object_pattern = re.compile(r"\{[^{}]{0,1200}\}", re.IGNORECASE | re.DOTALL)
+        for match in object_pattern.finditer(html):
+            snippet = match.group(0)
+            if not re.search(date_pattern, snippet, re.IGNORECASE):
+                continue
+
+            challenge_match = re.search(challenge_key_pattern, snippet, re.IGNORECASE)
+            if challenge_match:
+                date_scoped_candidates.append(int(challenge_match.group(1).replace(",", "")))
+
+        if not date_scoped_candidates:
+            forward_pattern = re.compile(
+                rf"(?:{date_pattern}).{{0,200}}?(?:total\s*)?(?:challenges|attempts)\D{{0,20}}([\d,]+)",
+                re.IGNORECASE | re.DOTALL,
+            )
+            reverse_pattern = re.compile(
+                rf"(?:total\s*)?(?:challenges|attempts)\D{{0,20}}([\d,]+).{{0,200}}?(?:{date_pattern})",
+                re.IGNORECASE | re.DOTALL,
+            )
+
+            for pattern in (forward_pattern, reverse_pattern):
+                for match in pattern.finditer(html):
+                    date_scoped_candidates.append(int(match.group(1).replace(",", "")))
+
+        if date_scoped_candidates:
+            return date_scoped_candidates[0]
+
+        raise ValueError(f"Could not find total ABS attempts for selected date {target_date.isoformat()}")
+
+    def _daily_date_tokens(self, target_date: date) -> list[str]:
+        return [
+            target_date.isoformat(),
+            f"{target_date.month}/{target_date.day}/{target_date.year}",
+            f"{target_date.month:02d}/{target_date.day:02d}/{target_date.year}",
+            f"{target_date.month}/{target_date.day}/{target_date.year % 100:02d}",
+            f"{target_date.month:02d}/{target_date.day:02d}/{target_date.year % 100:02d}",
+        ]
 
     def _today_eastern(self) -> date:
         return datetime.now(tz=EASTERN).date()
