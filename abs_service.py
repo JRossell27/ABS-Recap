@@ -86,10 +86,18 @@ class ABSService:
         return response.text
 
     def _parse_attempt_total(self, html: str) -> int:
-        match = re.search(r"\b([\d,]+)\s+attempts\b", html, re.IGNORECASE)
-        if not match:
-            raise ValueError("Could not find total ABS attempts on Baseball Savant page")
-        return int(match.group(1).replace(",", ""))
+        patterns = [
+            r"\b([\d,]+)\s+(?:attempts?|challenges?)\b",
+            r'"(?:totalChallenges|attemptTotal|totalAttempts|total)"\s*:\s*"?([\d,]+)"?',
+            r'(?:totalChallenges|attemptTotal|totalAttempts|total)\s*=\s*"?([\d,]+)"?',
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, html, re.IGNORECASE)
+            if match:
+                return int(match.group(1).replace(",", ""))
+
+        raise ValueError("Could not find total ABS attempts on Baseball Savant page")
 
     def _today_eastern(self) -> date:
         return datetime.now(tz=EASTERN).date()
