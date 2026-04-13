@@ -7,19 +7,28 @@ from abs_service import ABSService
 class _DummyResponse:
     def __init__(self, text: str):
         self.text = text
+        self._json = None
 
     def raise_for_status(self):
         return None
 
+    def json(self):
+        if self._json is None:
+            raise ValueError("No JSON payload configured for dummy response")
+        return self._json
+
 
 class _DummySession:
-    def __init__(self, text: str):
+    def __init__(self, text: str, json_payload=None):
         self.text = text
+        self.json_payload = json_payload
         self.calls = []
 
     def get(self, url, params=None, headers=None, timeout=None):
         self.calls.append({"url": url, "params": params, "headers": headers, "timeout": timeout})
-        return _DummyResponse(self.text)
+        response = _DummyResponse(self.text)
+        response._json = self.json_payload
+        return response
 
 
 def test_parse_attempt_total_from_savant_markup():
@@ -46,9 +55,10 @@ def test_get_daily_total_uses_selected_date_in_params():
     assert recap["batters_total"] == 8
     assert recap["fielders_total"] == 9
     assert recap["date"] == date(2026, 4, 10)
-    assert session.calls[0]["params"]["startDate"] == "2026-04-10"
-    assert session.calls[0]["params"]["endDate"] == "2026-04-10"
-    assert "User-Agent" in session.calls[0]["headers"]
+    savant_call = next(call for call in session.calls if call["params"] and "startDate" in call["params"])
+    assert savant_call["params"]["startDate"] == "2026-04-10"
+    assert savant_call["params"]["endDate"] == "2026-04-10"
+    assert "User-Agent" in savant_call["headers"]
 
 
 def test_get_season_total_uses_dashboard_and_year():
@@ -117,19 +127,28 @@ def test_format_season_discord_message_contains_source_and_total():
 class _DummyResponse:
     def __init__(self, text: str):
         self.text = text
+        self._json = None
 
     def raise_for_status(self):
         return None
 
+    def json(self):
+        if self._json is None:
+            raise ValueError("No JSON payload configured for dummy response")
+        return self._json
+
 
 class _DummySession:
-    def __init__(self, text: str):
+    def __init__(self, text: str, json_payload=None):
         self.text = text
+        self.json_payload = json_payload
         self.calls = []
 
     def get(self, url, params=None, headers=None, timeout=None):
         self.calls.append({"url": url, "params": params, "headers": headers, "timeout": timeout})
-        return _DummyResponse(self.text)
+        response = _DummyResponse(self.text)
+        response._json = self.json_payload
+        return response
 
 
 def test_parse_attempt_total_from_savant_markup():
@@ -145,8 +164,9 @@ def test_get_savant_daily_total_uses_selected_date_in_params():
     recap = svc.get_savant_daily_total(target_date=__import__("datetime").date(2026, 4, 10))
 
     assert recap["total"] == 17
-    assert session.calls[0]["params"]["startDate"] == "2026-04-10"
-    assert session.calls[0]["params"]["endDate"] == "2026-04-10"
+    savant_call = next(call for call in session.calls if call["params"] and "startDate" in call["params"])
+    assert savant_call["params"]["startDate"] == "2026-04-10"
+    assert savant_call["params"]["endDate"] == "2026-04-10"
 
 
 def test_get_savant_season_total_uses_dashboard_and_year():
@@ -248,3 +268,91 @@ def test_get_daily_total_falls_back_to_dashboard_when_leaderboard_fails():
     svc = ABSService(session=_FallbackSession())
     recap = svc.get_daily_total(target_date=date(2026, 4, 10))
     assert recap["total"] == 44
+
+
+def test_count_abs_challenges_in_feed_counts_reviewed_pitch_calls():
+    svc = ABSService()
+    payload = {
+        "liveData": {
+            "plays": {
+                "allPlays": [
+                    {
+                        "atBatIndex": 1,
+                        "playEvents": [
+                            {
+                                "isPitch": True,
+                                "pitchNumber": 1,
+                                "playId": "a",
+                                "details": {
+                                    "hasReview": True,
+                                    "description": "Called Strike",
+                                    "call": {"description": "Called Strike"},
+                                },
+                            },
+                            {
+                                "isPitch": True,
+                                "pitchNumber": 2,
+                                "playId": "b",
+                                "details": {
+                                    "hasReview": False,
+                                    "description": "Ball",
+                                    "call": {"description": "Ball"},
+                                },
+                            },
+                        ],
+                    }
+                ]
+            }
+        }
+    }
+    assert svc._count_abs_challenges_in_feed(payload) == 1
+
+
+def test_get_daily_total_uses_statsapi_total_when_savant_daily_total_missing():
+    class _CombinedSession:
+        def get(self, url, params=None, headers=None, timeout=None):
+            if "statsapi.mlb.com/api/v1/schedule" in url:
+                resp = _DummyResponse("")
+                resp._json = {"dates": [{"games": [{"gamePk": 1}]}]}
+                return resp
+            if "statsapi.mlb.com/api/v1.1/game/1/feed/live" in url:
+                resp = _DummyResponse("")
+                resp._json = {
+                    "liveData": {
+                        "plays": {
+                            "allPlays": [
+                                {
+                                    "atBatIndex": 1,
+                                    "playEvents": [
+                                        {
+                                            "isPitch": True,
+                                            "pitchNumber": 1,
+                                            "playId": "a",
+                                            "details": {
+                                                "hasReview": True,
+                                                "description": "Ball",
+                                                "call": {"description": "Ball"},
+                                            },
+                                        },
+                                        {
+                                            "isPitch": True,
+                                            "pitchNumber": 2,
+                                            "playId": "b",
+                                            "details": {
+                                                "hasReview": True,
+                                                "description": "Called Strike",
+                                                "call": {"description": "Called Strike"},
+                                            },
+                                        },
+                                    ],
+                                }
+                            ]
+                        }
+                    }
+                }
+                return resp
+            return _DummyResponse("<html>no daily totals here</html>")
+
+    svc = ABSService(session=_CombinedSession())
+    recap = svc.get_daily_total(target_date=date(2026, 4, 10))
+    assert recap["total"] == 2

@@ -18,12 +18,37 @@ class ABSService:
 
     def get_daily_total(self, target_date: Optional[date] = None, run_date: Optional[date] = None) -> Dict[str, Any]:
         use_date = target_date or ((run_date or self._today_eastern()) - timedelta(days=1))
-        page = self._fetch_daily_page(use_date)
-        overturn_breakdown = self._parse_daily_overturn_breakdown(page)
+        try:
+            statsapi_total = self._fetch_statsapi_daily_total(use_date)
+        except Exception:
+            statsapi_total = None
+        page = ""
+        overturn_breakdown: Dict[str, Optional[int]] = {}
+        page_error: Optional[Exception] = None
+        try:
+            page = self._fetch_daily_page(use_date)
+            overturn_breakdown = self._parse_daily_overturn_breakdown(page)
+        except Exception as exc:
+            page_error = exc
+
+        parsed_page_total: Optional[int] = None
+        if page:
+            try:
+                parsed_page_total = self._parse_daily_attempt_total(page, use_date)
+            except ValueError:
+                parsed_page_total = None
+
+        resolved_total = overturn_breakdown.get("overall_total") or statsapi_total or parsed_page_total
+        if resolved_total is None:
+            if page_error is not None:
+                raise RuntimeError(
+                    "Failed to get daily ABS total from both Stats API and Baseball Savant"
+                ) from page_error
+            raise ValueError(f"Could not determine daily ABS total for {use_date.isoformat()}")
+
         return {
             "date": use_date,
-            "total": overturn_breakdown.get("overall_total")
-            or self._parse_daily_attempt_total(page, use_date),
+            "total": resolved_total,
             "overall_overturn_pct": overturn_breakdown.get("overall_pct"),
             "overall_overturns": overturn_breakdown.get("overall_overturns"),
             "batters_total": overturn_breakdown.get("batters_total"),
@@ -142,6 +167,81 @@ class ABSService:
             "Accept-Language": "en-US,en;q=0.9",
             "Referer": "https://baseballsavant.mlb.com/",
         }
+
+    def _fetch_statsapi_daily_total(self, target_date: date) -> Optional[int]:
+        game_pks = self._fetch_statsapi_game_pks(target_date)
+        if not game_pks:
+            return None
+
+        total = 0
+        for game_pk in game_pks:
+            feed = self._fetch_statsapi_game_feed(game_pk)
+            total += self._count_abs_challenges_in_feed(feed)
+        return total
+
+    def _fetch_statsapi_game_pks(self, target_date: date) -> list[int]:
+        url = "https://statsapi.mlb.com/api/v1/schedule"
+        response = self.session.get(
+            url,
+            params={"sportId": 1, "gameType": "R", "date": target_date.isoformat()},
+            headers=self._request_headers(),
+            timeout=45,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        game_pks: list[int] = []
+        for day in payload.get("dates", []):
+            for game in day.get("games", []):
+                game_pk = game.get("gamePk")
+                if isinstance(game_pk, int):
+                    game_pks.append(game_pk)
+        return game_pks
+
+    def _fetch_statsapi_game_feed(self, game_pk: int) -> Dict[str, Any]:
+        url = f"https://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live"
+        response = self.session.get(url, headers=self._request_headers(), timeout=45)
+        response.raise_for_status()
+        return response.json()
+
+    def _count_abs_challenges_in_feed(self, payload: Dict[str, Any]) -> int:
+        plays = payload.get("liveData", {}).get("plays", {}).get("allPlays", [])
+        seen_keys = set()
+        count = 0
+
+        for play in plays:
+            for event in play.get("playEvents", []):
+                if not event.get("isPitch"):
+                    continue
+
+                details = event.get("details", {})
+                if not details.get("hasReview"):
+                    continue
+
+                detail_text = " ".join(
+                    str(value).lower()
+                    for value in (
+                        details.get("description", ""),
+                        (details.get("call") or {}).get("description", ""),
+                        details.get("code", ""),
+                    )
+                )
+
+                is_pitch_call = "ball" in detail_text or "strike" in detail_text or "zone" in detail_text
+                if not is_pitch_call:
+                    continue
+
+                dedupe_key = (
+                    play.get("atBatIndex"),
+                    event.get("pitchNumber"),
+                    event.get("playId"),
+                    details.get("description"),
+                )
+                if dedupe_key in seen_keys:
+                    continue
+                seen_keys.add(dedupe_key)
+                count += 1
+
+        return count
 
     def _parse_attempt_total(self, html: str) -> int:
         pattern_priorities = [
