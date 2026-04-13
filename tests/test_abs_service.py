@@ -28,12 +28,23 @@ def test_parse_attempt_total_from_savant_markup():
 
 
 def test_get_daily_total_uses_selected_date_in_params():
-    session = _DummySession('{"game_date":"2026-04-10","totalChallenges":"17"}')
+    session = _DummySession(
+        """
+        {"game_date":"2026-04-10","totalChallenges":"17"}
+        <div>Daily Overturn%: 54% (9/17)</div>
+        <div>BATTERS Daily Overturn%: 50% (4/8)</div>
+        <div>FIELDERS Daily Overturn%: 56% (5/9)</div>
+        """
+    )
     svc = ABSService(session=session)
 
     recap = svc.get_daily_total(target_date=date(2026, 4, 10))
 
     assert recap["total"] == 17
+    assert recap["overall_overturn_pct"] == 54
+    assert recap["overall_overturns"] == 9
+    assert recap["batters_total"] == 8
+    assert recap["fielders_total"] == 9
     assert recap["date"] == date(2026, 4, 10)
     assert session.calls[0]["params"]["startDate"] == "2026-04-10"
     assert session.calls[0]["params"]["endDate"] == "2026-04-10"
@@ -54,9 +65,26 @@ def test_get_season_total_uses_dashboard_and_year():
 
 def test_format_daily_discord_message_contains_source_and_total():
     svc = ABSService()
-    message = svc.format_daily_discord_message({"date": date(2026, 4, 10), "total": 22, "source": "Baseball Savant"})
+    message = svc.format_daily_discord_message(
+        {
+            "date": date(2026, 4, 10),
+            "total": 22,
+            "overall_overturn_pct": 50,
+            "overall_overturns": 11,
+            "batters_overturn_pct": 45,
+            "batters_overturns": 5,
+            "batters_total": 11,
+            "fielders_overturn_pct": 55,
+            "fielders_overturns": 6,
+            "fielders_total": 11,
+            "source": "Baseball Savant",
+        }
+    )
     assert "April" in message
     assert "Total Challenges: 22" in message
+    assert "Daily Overturn%: 50% (11/22)" in message
+    assert "Batters Daily Overturn%: 45% (5/11)" in message
+    assert "Fielders Daily Overturn%: 55% (6/11)" in message
     assert "Source: Baseball Savant" in message
 
 
@@ -188,6 +216,21 @@ def test_parse_daily_attempt_total_ignores_per_game_challenge_count_rows():
     }
     """
     assert svc._parse_daily_attempt_total(html, date(2026, 4, 12)) == 59
+
+
+def test_parse_daily_overturn_breakdown_reads_overall_batters_fielders():
+    svc = ABSService()
+    html = """
+    Daily Overturn%: 54% (32/59)
+    BATTERS Daily Overturn%: 52% (13/25)
+    FIELDERS Daily Overturn%: 56% (19/34)
+    7-Day Rolling Overturn%: 53%
+    """
+    breakdown = svc._parse_daily_overturn_breakdown(html)
+    assert breakdown["overall_total"] == 59
+    assert breakdown["overall_overturns"] == 32
+    assert breakdown["batters_total"] == 25
+    assert breakdown["fielders_total"] == 34
 
 
 class _FallbackSession:

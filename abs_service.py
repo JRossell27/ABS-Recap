@@ -19,9 +19,19 @@ class ABSService:
     def get_daily_total(self, target_date: Optional[date] = None, run_date: Optional[date] = None) -> Dict[str, Any]:
         use_date = target_date or ((run_date or self._today_eastern()) - timedelta(days=1))
         page = self._fetch_daily_page(use_date)
+        overturn_breakdown = self._parse_daily_overturn_breakdown(page)
         return {
             "date": use_date,
-            "total": self._parse_daily_attempt_total(page, use_date),
+            "total": overturn_breakdown.get("overall_total")
+            or self._parse_daily_attempt_total(page, use_date),
+            "overall_overturn_pct": overturn_breakdown.get("overall_pct"),
+            "overall_overturns": overturn_breakdown.get("overall_overturns"),
+            "batters_total": overturn_breakdown.get("batters_total"),
+            "batters_overturn_pct": overturn_breakdown.get("batters_pct"),
+            "batters_overturns": overturn_breakdown.get("batters_overturns"),
+            "fielders_total": overturn_breakdown.get("fielders_total"),
+            "fielders_overturn_pct": overturn_breakdown.get("fielders_pct"),
+            "fielders_overturns": overturn_breakdown.get("fielders_overturns"),
             "source": "Baseball Savant",
         }
 
@@ -42,14 +52,32 @@ class ABSService:
         return self.get_season_total(season=season, run_date=run_date)
 
     def format_daily_discord_message(self, recap: Dict[str, Any]) -> str:
-        return "\n".join(
-            [
-                "ABS Daily Recap ⚾️",
-                recap["date"].strftime("%B %-d, %Y"),
-                f"Total Challenges: {recap['total']}",
-                f"Source: {recap.get('source', 'Baseball Savant')}",
-            ]
-        )
+        lines = [
+            "ABS Daily Recap ⚾️",
+            recap["date"].strftime("%B %-d, %Y"),
+            f"Total Challenges: {recap['total']}",
+        ]
+
+        if recap.get("overall_overturn_pct") is not None and recap.get("overall_overturns") is not None:
+            lines.append(
+                f"Daily Overturn%: {recap['overall_overturn_pct']}% "
+                f"({recap['overall_overturns']}/{recap['total']})"
+            )
+
+        if recap.get("batters_overturn_pct") is not None and recap.get("batters_overturns") is not None:
+            lines.append(
+                f"Batters Daily Overturn%: {recap['batters_overturn_pct']}% "
+                f"({recap['batters_overturns']}/{recap.get('batters_total', '?')})"
+            )
+
+        if recap.get("fielders_overturn_pct") is not None and recap.get("fielders_overturns") is not None:
+            lines.append(
+                f"Fielders Daily Overturn%: {recap['fielders_overturn_pct']}% "
+                f"({recap['fielders_overturns']}/{recap.get('fielders_total', '?')})"
+            )
+
+        lines.append(f"Source: {recap.get('source', 'Baseball Savant')}")
+        return "\n".join(lines)
 
     def format_season_discord_message(self, recap: Dict[str, Any]) -> str:
         lines = [
@@ -190,6 +218,28 @@ class ABSService:
             return max(date_scoped_candidates)
 
         raise ValueError(f"Could not find total ABS attempts for selected date {target_date.isoformat()}")
+
+    def _parse_daily_overturn_breakdown(self, html: str) -> Dict[str, Optional[int]]:
+        matches = list(
+            re.finditer(
+                r"Daily\s+Overturn%\s*:?\s*(\d+)%\s*\((\d+)\s*/\s*(\d+)\)",
+                html,
+                re.IGNORECASE,
+            )
+        )
+        if not matches:
+            return {}
+
+        sections = ["overall", "batters", "fielders"]
+        breakdown: Dict[str, Optional[int]] = {}
+
+        for idx, match in enumerate(matches[:3]):
+            section = sections[idx]
+            breakdown[f"{section}_pct"] = int(match.group(1))
+            breakdown[f"{section}_overturns"] = int(match.group(2))
+            breakdown[f"{section}_total"] = int(match.group(3))
+
+        return breakdown
 
     def _daily_date_tokens(self, target_date: date) -> list[str]:
         return [
