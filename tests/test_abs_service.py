@@ -1,4 +1,5 @@
 from datetime import date
+import requests
 
 from abs_service import ABSService
 
@@ -16,8 +17,8 @@ class _DummySession:
         self.text = text
         self.calls = []
 
-    def get(self, url, params=None, timeout=None):
-        self.calls.append({"url": url, "params": params, "timeout": timeout})
+    def get(self, url, params=None, headers=None, timeout=None):
+        self.calls.append({"url": url, "params": params, "headers": headers, "timeout": timeout})
         return _DummyResponse(self.text)
 
 
@@ -36,6 +37,7 @@ def test_get_daily_total_uses_selected_date_in_params():
     assert recap["date"] == date(2026, 4, 10)
     assert session.calls[0]["params"]["startDate"] == "2026-04-10"
     assert session.calls[0]["params"]["endDate"] == "2026-04-10"
+    assert "User-Agent" in session.calls[0]["headers"]
 
 
 def test_get_season_total_uses_dashboard_and_year():
@@ -97,8 +99,8 @@ class _DummySession:
         self.text = text
         self.calls = []
 
-    def get(self, url, params=None, timeout=None):
-        self.calls.append({"url": url, "params": params, "timeout": timeout})
+    def get(self, url, params=None, headers=None, timeout=None):
+        self.calls.append({"url": url, "params": params, "headers": headers, "timeout": timeout})
         return _DummyResponse(self.text)
 
 
@@ -137,3 +139,25 @@ def test_parse_attempt_total_supports_challenges_wording():
 def test_parse_attempt_total_supports_json_total_challenges_key():
     svc = ABSService()
     assert svc._parse_attempt_total('{"totalChallenges": "1,234"}') == 1234
+
+
+def test_parse_attempt_total_supports_data_attribute_fallback():
+    svc = ABSService()
+    assert svc._parse_attempt_total('<div data-total-challenges="333"></div>') == 333
+
+
+class _FallbackSession:
+    def __init__(self):
+        self.calls = []
+
+    def get(self, url, params=None, headers=None, timeout=None):
+        self.calls.append(url)
+        if "leaderboard" in url:
+            raise requests.RequestException("leaderboard blocked")
+        return _DummyResponse("<div>44 attempts</div>")
+
+
+def test_get_daily_total_falls_back_to_dashboard_when_leaderboard_fails():
+    svc = ABSService(session=_FallbackSession())
+    recap = svc.get_daily_total(target_date=date(2026, 4, 10))
+    assert recap["total"] == 44

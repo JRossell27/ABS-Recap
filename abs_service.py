@@ -18,14 +18,7 @@ class ABSService:
 
     def get_daily_total(self, target_date: Optional[date] = None, run_date: Optional[date] = None) -> Dict[str, Any]:
         use_date = target_date or ((run_date or self._today_eastern()) - timedelta(days=1))
-        params = {
-            "year": use_date.year,
-            "level": "mlb",
-            "gameType": "regular",
-            "startDate": use_date.isoformat(),
-            "endDate": use_date.isoformat(),
-        }
-        page = self._fetch_savant_page(SAVANT_ABS_LEADERBOARD_URL, params=params)
+        page = self._fetch_daily_page(use_date)
         return {
             "date": use_date,
             "total": self._parse_attempt_total(page),
@@ -35,12 +28,7 @@ class ABSService:
     def get_season_total(self, season: Optional[int] = None, run_date: Optional[date] = None) -> Dict[str, Any]:
         today = run_date or self._today_eastern()
         use_season = season or today.year
-        params = {
-            "year": use_season,
-            "level": "mlb",
-            "gameType": "regular",
-        }
-        page = self._fetch_savant_page(SAVANT_ABS_DASHBOARD_URL, params=params)
+        page = self._fetch_season_page(use_season)
         return {
             "season": use_season,
             "total": self._parse_attempt_total(page),
@@ -81,15 +69,59 @@ class ABSService:
         return "\n".join(lines)
 
     def _fetch_savant_page(self, url: str, params: Dict[str, Any]) -> str:
-        response = self.session.get(url, params=params, timeout=45)
+        response = self.session.get(url, params=params, headers=self._request_headers(), timeout=45)
         response.raise_for_status()
         return response.text
+
+    def _fetch_daily_page(self, target_date: date) -> str:
+        params = {
+            "year": target_date.year,
+            "level": "mlb",
+            "gameType": "regular",
+            "startDate": target_date.isoformat(),
+            "endDate": target_date.isoformat(),
+        }
+        errors = []
+        for url in (SAVANT_ABS_LEADERBOARD_URL, SAVANT_ABS_DASHBOARD_URL):
+            try:
+                return self._fetch_savant_page(url, params=params)
+            except requests.RequestException as exc:
+                errors.append(f"{url}: {exc}")
+        raise RuntimeError("Failed to fetch Baseball Savant daily ABS page. " + " | ".join(errors))
+
+    def _fetch_season_page(self, season: int) -> str:
+        params = {
+            "year": season,
+            "level": "mlb",
+            "gameType": "regular",
+        }
+        errors = []
+        for url in (SAVANT_ABS_DASHBOARD_URL, SAVANT_ABS_LEADERBOARD_URL):
+            try:
+                return self._fetch_savant_page(url, params=params)
+            except requests.RequestException as exc:
+                errors.append(f"{url}: {exc}")
+        raise RuntimeError("Failed to fetch Baseball Savant season ABS page. " + " | ".join(errors))
+
+    def _request_headers(self) -> Dict[str, str]:
+        return {
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://baseballsavant.mlb.com/",
+        }
 
     def _parse_attempt_total(self, html: str) -> int:
         patterns = [
             r"\b([\d,]+)\s+(?:attempts?|challenges?)\b",
-            r'"(?:totalChallenges|attemptTotal|totalAttempts|total)"\s*:\s*"?([\d,]+)"?',
-            r'(?:totalChallenges|attemptTotal|totalAttempts|total)\s*=\s*"?([\d,]+)"?',
+            r'"(?:totalChallenges|attemptTotal|totalAttempts|challengesTotal|challengeTotal|challenge_count|total)"\s*:\s*"?([\d,]+)"?',
+            r"(?:totalChallenges|attemptTotal|totalAttempts|challengesTotal|challengeTotal|challenge_count|total)\s*=\s*\"?([\d,]+)\"?",
+            r'data-(?:total-)?(?:challenges|attempts)\s*=\s*"([\d,]+)"',
+            r"\b(?:total|abs)\s*(?:challenges|attempts)\D+([\d,]+)\b",
         ]
 
         for pattern in patterns:
