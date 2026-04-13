@@ -28,7 +28,7 @@ def test_parse_attempt_total_from_savant_markup():
 
 
 def test_get_daily_total_uses_selected_date_in_params():
-    session = _DummySession("<div>17 attempts</div>")
+    session = _DummySession('{"game_date":"2026-04-10","totalChallenges":"17"}')
     svc = ABSService(session=session)
 
     recap = svc.get_daily_total(target_date=date(2026, 4, 10))
@@ -111,7 +111,7 @@ def test_parse_attempt_total_from_savant_markup():
 
 
 def test_get_savant_daily_total_uses_selected_date_in_params():
-    session = _DummySession("<div>17 attempts</div>")
+    session = _DummySession('{"game_date":"2026-04-10","totalChallenges":"17"}')
     svc = ABSService(session=session)
 
     recap = svc.get_savant_daily_total(target_date=__import__("datetime").date(2026, 4, 10))
@@ -155,6 +155,30 @@ def test_parse_attempt_total_prefers_total_over_per_game_value():
     assert svc._parse_attempt_total(html) == 143
 
 
+def test_parse_attempt_total_ignores_non_challenge_total_values():
+    svc = ABSService()
+    html = '{"season":"2025","total":"2025","totalChallenges":"144"}'
+    assert svc._parse_attempt_total(html) == 144
+
+
+def test_parse_attempt_total_prefers_first_high_priority_daily_total():
+    svc = ABSService()
+    html = """
+    <div>Total Challenges: 59</div>
+    <script>window.payload = {"totalChallenges":"144"};</script>
+    """
+    assert svc._parse_attempt_total(html) == 59
+
+
+def test_parse_daily_attempt_total_uses_requested_date_match():
+    svc = ABSService()
+    html = """
+    [{"game_date":"2026-04-11","totalChallenges":"44"},
+     {"game_date":"2026-04-12","totalChallenges":"59"}]
+    """
+    assert svc._parse_daily_attempt_total(html, date(2026, 4, 12)) == 59
+
+
 class _FallbackSession:
     def __init__(self):
         self.calls = []
@@ -163,7 +187,7 @@ class _FallbackSession:
         self.calls.append(url)
         if "leaderboard" in url:
             raise requests.RequestException("leaderboard blocked")
-        return _DummyResponse("<div>44 attempts</div>")
+        return _DummyResponse('{"game_date":"2026-04-10","totalChallenges":"44"}')
 
 
 def test_get_daily_total_falls_back_to_dashboard_when_leaderboard_fails():
