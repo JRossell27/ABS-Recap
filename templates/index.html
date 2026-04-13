@@ -67,10 +67,13 @@
     <div class="card">
       <h1>ABS Recap Dashboard ⚾️</h1>
       <p>
-        Daily recap always uses the prior day. Click a button to post directly to your Discord channel via webhook.
+        Daily recap defaults to the prior day, or choose an explicit date to pull the total challenges from Baseball Savant.
       </p>
 
       <form method="post" action="/send/daily">
+        <label for="target_date">Specific date (optional):</label><br />
+        <input id="target_date" name="target_date" type="date" />
+        <br />
         <button type="submit" class="daily">Send Daily Recap</button>
       </form>
 
@@ -78,7 +81,7 @@
         <label for="season">Season year (optional):</label><br />
         <input id="season" name="season" type="number" placeholder="2026" min="2024" max="2100" />
         <br />
-        <button type="submit" class="season">Send Season Leaderboard</button>
+        <button type="submit" class="season">Send Season Total</button>
       </form>
 
       {% with messages = get_flashed_messages(with_categories=true) %}

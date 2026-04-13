@@ -10,6 +10,8 @@ from zoneinfo import ZoneInfo
 
 MLB_BASE_URL = "https://statsapi.mlb.com/api/v1"
 MLB_FEED_URL = "https://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live"
+SAVANT_ABS_DASHBOARD_URL = "https://baseballsavant.mlb.com/abs"
+SAVANT_ABS_LEADERBOARD_URL = "https://baseballsavant.mlb.com/leaderboard/abs-challenges"
 
 CHALLENGE_EVENT_KEYWORDS = {
     "pitch challenge",
@@ -79,6 +81,49 @@ class ABSService:
         if debug:
             result["per_game"] = per_game_log
         return result
+
+
+    def get_savant_daily_total(self, target_date: date) -> Dict[str, Any]:
+        params = {
+            "year": target_date.year,
+            "level": "mlb",
+            "gameType": "regular",
+            "startDate": target_date.isoformat(),
+            "endDate": target_date.isoformat(),
+        }
+        page = self._fetch_savant_page(SAVANT_ABS_LEADERBOARD_URL, params=params)
+        return {
+            "date": target_date,
+            "total": self._parse_attempt_total(page),
+            "source": "baseballsavant",
+        }
+
+    def get_savant_season_total(self, season: Optional[int] = None, run_date: Optional[date] = None) -> Dict[str, Any]:
+        today = run_date or self._today_eastern()
+        use_season = season or today.year
+
+        params = {
+            "year": use_season,
+            "level": "mlb",
+            "gameType": "regular",
+        }
+        page = self._fetch_savant_page(SAVANT_ABS_DASHBOARD_URL, params=params)
+        return {
+            "season": use_season,
+            "total": self._parse_attempt_total(page),
+            "source": "baseballsavant",
+        }
+
+    def _fetch_savant_page(self, url: str, params: Dict[str, Any]) -> str:
+        response = self.session.get(url, params=params, timeout=45)
+        response.raise_for_status()
+        return response.text
+
+    def _parse_attempt_total(self, html: str) -> int:
+        match = re.search(r"\b([\d,]+)\s+attempts\b", html, re.IGNORECASE)
+        if not match:
+            raise ValueError("Could not find total ABS attempts on Baseball Savant page")
+        return int(match.group(1).replace(",", ""))
 
     def get_season_leaderboard(
         self,

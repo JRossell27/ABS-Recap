@@ -3,9 +3,9 @@
 Flask dashboard that sends MLB ABS pitch-challenge recaps to Discord.
 
 ## What it does
-- **Daily recap button**: always posts **yesterday's** ABS results.
-- **Season leaderboard button**: posts top hitters and fielders by challenge success rate.
-- Uses MLB Stats API schedule + live feed endpoints.
+- **Daily recap button**: posts **yesterday's** ABS recap by default, or a selected date using Baseball Savant totals.
+- **Season total button**: posts a Baseball Savant season total for the selected year.
+- Uses MLB Stats API for full recap parsing and Baseball Savant scraping for selected-date/season totals.
 - Filters to pitch-call ABS challenges only (ball/strike/zone), excluding hit-by-pitch plays.
 
 ## Setup
