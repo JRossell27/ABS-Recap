@@ -7,6 +7,10 @@ Flask dashboard that sends MLB ABS totals from Baseball Savant to Discord.
 - **Optional date picker**: choose any specific day and send that day’s Savant total.
 - **Season total button**: sends the selected season’s Savant total challenges.
 - Uses Baseball Savant pages as the data source.
+- **Daily recap button**: posts **yesterday's** ABS recap by default, or a selected date using Baseball Savant totals.
+- **Season total button**: posts a Baseball Savant season total for the selected year.
+- Uses MLB Stats API for full recap parsing and Baseball Savant scraping for selected-date/season totals.
+- Filters to pitch-call ABS challenges only (ball/strike/zone), excluding hit-by-pitch plays.
 
 ## Setup
 
