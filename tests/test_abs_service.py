@@ -128,3 +128,12 @@ def test_get_savant_season_total_uses_dashboard_and_year():
     assert recap["total"] == 1002
     assert session.calls[0]["params"]["year"] == 2026
     assert session.calls[0]["params"]["gameType"] == "regular"
+
+def test_parse_attempt_total_supports_challenges_wording():
+    svc = ABSService()
+    assert svc._parse_attempt_total('<div><span>245 challenges</span></div>') == 245
+
+
+def test_parse_attempt_total_supports_json_total_challenges_key():
+    svc = ABSService()
+    assert svc._parse_attempt_total('{"totalChallenges": "1,234"}') == 1234
