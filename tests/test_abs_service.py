@@ -435,3 +435,49 @@ def test_season_message_shows_totals_even_without_leader_rows():
     assert "Hitters: 271" in message
     assert "Fielders: 269" in message
     assert "Unclassified: 2" in message
+
+
+class _DummyResponse:
+    def __init__(self, text: str):
+        self.text = text
+
+    def raise_for_status(self):
+        return None
+
+
+class _DummySession:
+    def __init__(self, text: str):
+        self.text = text
+        self.calls = []
+
+    def get(self, url, params=None, timeout=None):
+        self.calls.append({"url": url, "params": params, "timeout": timeout})
+        return _DummyResponse(self.text)
+
+
+def test_parse_attempt_total_from_savant_markup():
+    svc = ABSService()
+    html = "<div><span>932 attempts</span></div>"
+    assert svc._parse_attempt_total(html) == 932
+
+
+def test_get_savant_daily_total_uses_selected_date_in_params():
+    session = _DummySession("<div>17 attempts</div>")
+    svc = ABSService(session=session)
+
+    recap = svc.get_savant_daily_total(target_date=__import__("datetime").date(2026, 4, 10))
+
+    assert recap["total"] == 17
+    assert session.calls[0]["params"]["startDate"] == "2026-04-10"
+    assert session.calls[0]["params"]["endDate"] == "2026-04-10"
+
+
+def test_get_savant_season_total_uses_dashboard_and_year():
+    session = _DummySession("<div>1,002 attempts</div>")
+    svc = ABSService(session=session)
+
+    recap = svc.get_savant_season_total(season=2026)
+
+    assert recap["total"] == 1002
+    assert session.calls[0]["params"]["year"] == 2026
+    assert session.calls[0]["params"]["gameType"] == "regular"
