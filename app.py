@@ -43,20 +43,6 @@ def send_daily():
         recap = service.get_daily_total(target_date=target_date)
         _post_to_discord(service.format_daily_discord_message(recap))
         flash(f"Daily Savant total sent for {recap['date'].isoformat()}.", "success")
-        if target_date is None:
-            recap = service.get_daily_recap()
-            _post_to_discord(service.format_daily_discord_message(recap))
-            flash(f"Daily recap sent for {recap['date'].isoformat()}.", "success")
-        else:
-            recap = service.get_savant_daily_total(target_date=target_date)
-            message = "\n".join([
-                "ABS Daily Recap ⚾️",
-                recap["date"].strftime("%B %-d, %Y"),
-                f"Total Challenges: {recap['total']}",
-                "Source: Baseball Savant",
-            ])
-            _post_to_discord(message)
-            flash(f"Daily Savant total sent for {recap['date'].isoformat()}.", "success")
     except Exception as exc:
         flash(f"Failed to send daily recap: {exc}", "error")
     return redirect(url_for("index"))
@@ -70,13 +56,6 @@ def send_season():
     try:
         recap = service.get_season_total(season=season)
         _post_to_discord(service.format_season_discord_message(recap))
-        recap = service.get_savant_season_total(season=season)
-        message = "\n".join([
-            f"ABS Season Summary {recap['season']} ⚾️",
-            f"Total Challenges: {recap['total']}",
-            "Source: Baseball Savant",
-        ])
-        _post_to_discord(message)
         flash(f"Season Savant total sent for {season}.", "success")
     except Exception as exc:
         flash(f"Failed to send season total: {exc}", "error")
