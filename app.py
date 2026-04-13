@@ -29,24 +29,9 @@ def index():
     return render_template("index.html")
 
 
-
-
 @app.get("/healthz")
 def healthz():
     return {"status": "ok"}, 200
-
-
-@app.get("/debug/daily")
-def debug_daily():
-    """Return a per-game challenge breakdown for yesterday to help diagnose count mismatches."""
-    recap = service.get_daily_recap(debug=True)
-    return {
-        "date": recap["date"].isoformat(),
-        "total": recap["total"],
-        "failed_games": recap["failed_games"],
-        "games_scanned": recap["games_scanned"],
-        "per_game": recap.get("per_game", []),
-    }, 200
 
 
 @app.post("/send/daily")
@@ -55,6 +40,9 @@ def send_daily():
     target_date = date.fromisoformat(target_date_raw) if target_date_raw else None
 
     try:
+        recap = service.get_daily_total(target_date=target_date)
+        _post_to_discord(service.format_daily_discord_message(recap))
+        flash(f"Daily Savant total sent for {recap['date'].isoformat()}.", "success")
         if target_date is None:
             recap = service.get_daily_recap()
             _post_to_discord(service.format_daily_discord_message(recap))
@@ -80,6 +68,8 @@ def send_season():
     season = int(season_raw) if season_raw else date.today().year
 
     try:
+        recap = service.get_season_total(season=season)
+        _post_to_discord(service.format_season_discord_message(recap))
         recap = service.get_savant_season_total(season=season)
         message = "\n".join([
             f"ABS Season Summary {recap['season']} ⚾️",
@@ -89,7 +79,7 @@ def send_season():
         _post_to_discord(message)
         flash(f"Season Savant total sent for {season}.", "success")
     except Exception as exc:
-        flash(f"Failed to send season leaderboard: {exc}", "error")
+        flash(f"Failed to send season total: {exc}", "error")
     return redirect(url_for("index"))
 
 
