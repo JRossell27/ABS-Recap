@@ -116,18 +116,36 @@ class ABSService:
         }
 
     def _parse_attempt_total(self, html: str) -> int:
-        patterns = [
-            r"\b([\d,]+)\s+(?:attempts?|challenges?)\b",
-            r'"(?:totalChallenges|attemptTotal|totalAttempts|challengesTotal|challengeTotal|challenge_count|total)"\s*:\s*"?([\d,]+)"?',
-            r"(?:totalChallenges|attemptTotal|totalAttempts|challengesTotal|challengeTotal|challenge_count|total)\s*=\s*\"?([\d,]+)\"?",
-            r'data-(?:total-)?(?:challenges|attempts)\s*=\s*"([\d,]+)"',
-            r"\b(?:total|abs)\s*(?:challenges|attempts)\D+([\d,]+)\b",
+        pattern_priorities = [
+            (
+                r"\b(?:total|abs)\s*(?:challenges|attempts)\D+([\d,]+)\b",
+                3,
+            ),
+            (
+                r'"(?:totalChallenges|attemptTotal|totalAttempts|challengesTotal|challengeTotal|challenge_count|total)"\s*:\s*"?([\d,]+)"?',
+                3,
+            ),
+            (
+                r"(?:totalChallenges|attemptTotal|totalAttempts|challengesTotal|challengeTotal|challenge_count|total)\s*=\s*\"?([\d,]+)\"?",
+                3,
+            ),
+            (
+                r'data-(?:total-)?(?:challenges|attempts)\s*=\s*"([\d,]+)"',
+                2,
+            ),
+            (
+                r"\b([\d,]+)\s+(?:attempts?|challenges?)\b",
+                1,
+            ),
         ]
 
-        for pattern in patterns:
-            match = re.search(pattern, html, re.IGNORECASE)
-            if match:
-                return int(match.group(1).replace(",", ""))
+        candidates = []
+        for pattern, priority in pattern_priorities:
+            for match in re.finditer(pattern, html, re.IGNORECASE):
+                candidates.append((priority, int(match.group(1).replace(",", ""))))
+
+        if candidates:
+            return max(candidates, key=lambda item: (item[0], item[1]))[1]
 
         raise ValueError("Could not find total ABS attempts on Baseball Savant page")
 

@@ -146,6 +146,15 @@ def test_parse_attempt_total_supports_data_attribute_fallback():
     assert svc._parse_attempt_total('<div data-total-challenges="333"></div>') == 333
 
 
+def test_parse_attempt_total_prefers_total_over_per_game_value():
+    svc = ABSService()
+    html = """
+    <div>Game A: 8 challenges</div>
+    <div>Total Challenges: 143</div>
+    """
+    assert svc._parse_attempt_total(html) == 143
+
+
 class _FallbackSession:
     def __init__(self):
         self.calls = []
